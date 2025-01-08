@@ -1,15 +1,3 @@
----
-title: "README"
-format:
-  html:
-    toc: true
-    toc-depth: 4
-embed-resources: true
-editor: 
-  markdown: 
-    wrap: 72
----
-
 # Cognitive control and motivated reasoning
 
 All data, code and generated output is openly available in this
