@@ -1,0 +1,674 @@
+---
+title: "Questionnaire Preparations: Cognitive Control and Motivated Reasoning"
+description: "Data cleaning, data checks, scale caluclations, and some further preparations for analyses specific of the questionnaire data."
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=F, message=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "tinytable",    # Lightweight package to create tables
+          "modelsummary", # Data and model summaries with tables and plots
+          "pandoc",       # Required for saving tables as docx
+          "MBESS",        # Mix of functions including reliability
+          "hrbrthemes",   # Additional ggplot themes
+          "extrafont",    # Additional fonts for plots etc
+          "showtext",     # So that fonts also work on mac
+          "patchwork",    # Combine ggplot objects
+          "corrplot",     # Correlation plots
+          "lavaan"        # Required for reliability calculation
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  # Load local font, make sure path is correct
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed")
+  font_add(family = "Roboto Condensed Light", regular = "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r colors, include=FALSE}
+# devtools needs to be installed: install.packages("devtools")
+devtools::install_github("dill/beyonce")
+library(beyonce)
+
+bp <- beyonce_palette(41, n = 9, type = "continuous")
+```
+
+### Data Preparations
+
+```{r load-data, include=FALSE}
+data_path <- here("01_data", "cleaned", "data_questionnaires_cleaned.csv")
+data_raw <- read_csv(data_path)
+
+# read the subj_idx to id table
+id_table <- read_csv(here("01_data", "private_id_to_subj_idx.csv"))
+```
+
+Add the same subj_idx as from the gng_task to the raw data.
+
+```{r add-subj-idx}
+data_id <- data_raw %>%
+  left_join(id_table, by = "Participant Private ID")
+
+# check if it worked
+id_check <- data_id %>%
+  select(`Participant Private ID`, subj_idx) %>%
+  distinct() 
+
+head(id_check)
+```
+
+### Convert data types
+
+```{r convert-items-to-factors}
+# Define the levels
+items_levels_order <- c("Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree")
+
+data_converted <- data_id %>% 
+  mutate(across(
+    .cols = c(o_immigration:dog11), 
+    .fns = ~ str_replace_all(.x, "Strongly Agree", "Strongly agree") %>%
+             factor(levels = items_levels_order, ordered = TRUE)
+  ))
+```
+
+```{r convert-demographics-to-factor}
+# Define the levels
+ideo_levels_order <- c("Extremely left", "Left", "Slightly left", 
+                       "Moderate",
+                       "Slightly right", "Right", "Extremely right")
+
+gender_order <- c("female", "male", "__other")
+
+data_converted <- data_converted %>% 
+  mutate(ideology = factor(ideology, levels = ideo_levels_order, ordered = TRUE),
+         gender = factor(gender, levels = gender_order, ordered = FALSE)) %>% 
+  mutate(gender = fct_recode(gender, "other" = "__other"))
+```
+
+```{r ideology-numerical}
+data_converted <- data_converted %>% 
+  mutate(
+    ideology_num = case_when(
+      ideology == "Extremely left" ~ 1,
+      ideology == "Left" ~ 2,
+      ideology == "Slightly left" ~ 3,
+      ideology == "Moderate" ~ 4,
+      ideology == "Slightly right" ~ 5,
+      ideology == "Right" ~ 6,
+      ideology == "Extremely right" ~ 7,
+      TRUE ~ NA_real_  
+    )) 
+```
+
+### Calculate variables
+
+##### Education ISCED Level
+
+-   ISCED 0-2 is anything up to GCSE
+
+-   ISCED 3-4 is anything up to A-levels
+
+-   ISCED 5-8 is anything in higher education (BSc, MSc, Doctoral degree and so on)
+
+```{r edu-isced}
+data_scores <- data_converted %>%
+  mutate(edu_group = case_when(
+    education %in% c("Primary school", "Secondary school up to 16 years (GCSEs or equivalent)") ~ "ISCED 0-2",
+    education == "Higher secondary or further education (A-levels, T-levels, BTEC, International Baccalaureate or equivalent)" ~ "ISCED 3-4",
+    education %in% c("Bachelors degree (BA, BSc., BEd., BEng.)", 
+                     "Masters Degree, M.Phil, Post-Graduate Diplomas and Certificates", 
+                     "Ph.D, D.Phil or equivalent") ~ "ISCED 5-8",
+    education %in% c("__other") ~ "Other",
+    TRUE ~ "Other"
+  ))  %>%
+  mutate(edu_group = factor(edu_group, levels = c("ISCED 0-2", "ISCED 3-4", "ISCED 5-8", "Other"), ordered = FALSE))
+```
+
+##### Age group 
+
+```{r age-group}
+data_scores <- data_scores %>%
+  mutate(age_group = case_when(
+    age_corrected >= 18 & age_corrected <= 24 ~ "18-24",
+    age_corrected >= 25 & age_corrected <= 31 ~ "25-31",
+    age_corrected >= 32 ~ "Above 32",
+    TRUE ~ "Other"
+    ),
+    age_group = factor(age_group, levels = c("18-24", "25-31", "Above 32", "Other"), ordered = FALSE)
+  )
+```
+
+##### Attention check
+
+Participants passed the attention check when they selected "Strongly agree".
+
+```{r recode attention-check}
+data_scores <- data_scores %>% 
+  mutate(questionnaire_attention_check = 
+           case_when(attention_check == "Strongly agree" ~ "passed",
+                     attention_check != "Strongly agree" ~ "failed"))
+```
+
+##### Score of Cognitive Reflection Test
+
+-   crt1 correct answer is 4 years
+
+-   crt2 correct answer is 10 seconds
+
+-   crt3 correct answer is 39 days
+
+```{r crt-correct-score}
+correct_answers <- list(crt1 = 4, crt2 = 10, crt3 = 39)
+
+data_scores <- data_scores %>% 
+  rowwise() %>%
+  mutate(
+    crt_correct = sum(
+      crt1 == correct_answers$crt1,
+      crt2 == correct_answers$crt2,
+      crt3 == correct_answers$crt3
+    )
+  ) %>%
+  ungroup()
+```
+
+##### Sum score of Dogmatism Scale
+
+Transform items to numeric
+
+```{r dog-score}
+data_numeric <- data_scores %>%
+  mutate(across(
+    .cols = c(dog01, dog02, dog03, dog04, dog05,  
+              dog06, dog07, dog08, dog09, 
+              dog10, dog11),
+    .fns = as.numeric
+  ))
+```
+
+Recode items dog02, dog04, dog05, dog07, dog08, dog09
+
+```{r recode-dog}
+# Reverse code relevant dog items
+data_numeric <- data_numeric %>%
+  mutate(
+    dog02_r = 6 - dog02,
+    dog04_r = 6 - dog04,
+    dog05_r = 6 - dog05,
+    dog07_r = 6 - dog07,
+    dog08_r = 6 - dog08,
+    dog09_r = 6 - dog09
+  )
+```
+
+Calculate the sum score
+
+```{r}
+data_scores <- data_numeric %>%
+  rowwise() %>%
+  mutate(dogmatism = sum(c_across(c(dog01, dog02_r, dog03, dog04_r, 
+                                    dog05_r, dog06, dog07_r, dog08_r,
+                                    dog09_r, dog10, dog11)), 
+                         na.rm = TRUE)) %>%
+  ungroup()
+```
+
+Calculate the reliability of the dogmatism scale
+
+```{r}
+data_numeric %>% 
+  select(dog01, dog02_r, dog03, dog04_r, dog05_r, 
+         dog06, dog07_r, dog08_r, dog09_r, dog10, dog11) %>% 
+  ci.reliability(., conf.level = 0.95, interval.type = 'mlr')
+```
+
+##### Affective polarisation
+
+Create a long df
+
+```{r}
+data_polarisation_long <- data_numeric %>% 
+  select(subj_idx, conservative_rating, labour_rating, libdem_rating, 
+         green_rating, reform_rating) %>% 
+  pivot_longer(
+    cols = -subj_idx,                  
+    names_to = "party",                
+    values_to = "rating"               
+  ) %>% 
+  mutate(
+    party = str_replace(party, "_rating", "")  # Remove "_rating" suffix
+  )
+```
+
+Calculate affective polarisation as the spread of ratings (see <https://www.sciencedirect.com/science/article/pii/S0261379420300822>)
+
+```{r}
+data_polarisation <- data_polarisation_long %>%
+  group_by(subj_idx) %>% 
+  # calculate mean of all party ratings for each subject
+  mutate(
+    M_rating = mean(rating, na.rm = TRUE), 
+    # calculate squared difference from the mean rating for each party
+    ExpDiff_rating = (rating - M_rating)^2
+  ) %>% 
+  reframe(
+    n_valid_ratings = sum(!is.na(rating)),
+    # calculate spread of ratings (affective polarization)
+    affective_polarisation = ifelse(n_valid_ratings >= 2, sqrt(mean(ExpDiff_rating, na.rm = TRUE)), NA)
+  ) %>%
+  ungroup() %>% 
+  select(subj_idx, affective_polarisation)
+
+data_polarisation
+```
+
+Add it back to the data
+
+```{r}
+data_scores <- data_scores %>% 
+  left_join(data_polarisation, by = "subj_idx")
+```
+
+### Code motives from issue opinion items
+
+The motives correspond to the ones in the Fake News Game.
+
+There are some questions that correspond to a Pro-Motive if the message in the Fake News Game is higher, and some questions that correspond to a Anti-Motive if the message in the Fake News Game is higher.
+
+If **Message in Fake News Game is Higher**, then Agree / Strongly Agree on the following questions corresponds to a Higher-Motive:
+
+-   o_climate
+
+-   o_immigration
+
+-   o_punishment
+
+-   o_teaculture
+
+-   o_brain
+
+In other words, for these questions, the values "Agree" and "Strongly Agree" should be coded as "Higher" for the variable "motive". And the values "Disagree" and "Strongly disagree" should be coded as "Lower". The value "Neutral" should stay as "Neutral".
+
+If **Message in Fake News Game is Higher**, then Agree / Strongly Agree on the following questions corresponds to a Lower-Motive:
+
+-   o_gender
+
+-   o_discrimination
+
+-   o_adoption
+
+-   o_selfenhancement
+
+-   o_cats
+
+In other words, for these questions, the values "Agree" and "Strongly agree" should be coded as "Lower" for the variable "motive". And the values "Disagree" and "Strongly disagree" should be coded as "Higher". The value "Neutral" should stay as "Neutral".
+
+I want to store these motives in variables called m\_\[topic\]
+
+In addition, I would like to calculate the strength of motives. Disagree and Agree are strength 1, and Strongly disagree and Strongly agree are strength 2.
+
+I want to store the strength of each motive in variables called s\_\[topic\]
+
+```{r code-motive-directions}
+# Define the questions corresponding to Higher and Lower motives
+higher_motive_questions <- c("o_climate", "o_immigration", "o_punishment", "o_teaculture", "o_brain")
+lower_motive_questions <- c("o_gender", "o_discrimination", "o_adoption", "o_selfenhancement", "o_cats")
+
+# Function to recode motives
+recode_motive <- function(x, higher = TRUE) {
+  case_when(
+    x %in% c("Agree", "Strongly agree") & higher ~ "Higher",
+    x %in% c("Disagree", "Strongly disagree") & higher ~ "Lower",
+    x %in% c("Agree", "Strongly agree") & !higher ~ "Lower",
+    x %in% c("Disagree", "Strongly disagree") & !higher ~ "Higher",
+    x == "Neutral" ~ "Neutral",
+    TRUE ~ NA_character_  
+  )
+}
+
+# Function to calculate motive strength
+calculate_strength <- function(x) {
+  case_when(
+    x %in% c("Strongly disagree", "Strongly agree") ~ 2,
+    x %in% c("Disagree", "Agree") ~ 1,
+    x == "Neutral" ~ NA_integer_,
+    TRUE ~ NA_integer_  
+  )
+}
+
+# Recode motives and calculate strengths
+data_motives <- data_scores %>%
+  mutate(
+    across(all_of(higher_motive_questions), ~ recode_motive(.x, higher = TRUE), .names = "m_{gsub('o_', '', col)}"),
+    across(all_of(lower_motive_questions), ~ recode_motive(.x, higher = FALSE), .names = "m_{gsub('o_', '', col)}"),
+    across(all_of(higher_motive_questions), ~ calculate_strength(.x), .names = "s_{gsub('o_', '', col)}"),
+    across(all_of(lower_motive_questions), ~ calculate_strength(.x), .names = "s_{gsub('o_', '', col)}")
+  )
+```
+
+### Code motives from ideology
+
+Ideology item: In politics, people often talk of “Left” and “Right”. Where would you place yourself on the following scale?
+
+1.  Extremely left - 7. Extremely right
+
+I created a new variable called "ideo_group" that codes
+
+-   Extremely left, Left and Slightly left: Left
+
+-   Extremely right, Right, and Slightly right: Right
+
+-   Moderate: Moderate
+
+I also code the strength from 0 (Moderate) to 3 (Extreme)
+
+The goal is now to create a variable for each issue that codes the ideology motive. As motives on non-political issues cannot be inferred using the ideology variable, I use arbitrary values for this.
+
+if ideo_group "Left" then this variable should take the values:
+
+-   climate: "Higher"
+
+-   adoption: "Lower"
+
+-   punishment: "Lower"
+
+-   gender: "Higher"
+
+-   discrimination: "Lower"
+
+-   immigration: "Lower"
+
+-   Random placeholders for non-political
+
+    -   teaculture: "Lower"
+
+    -   brain: "Lower"
+
+    -   cats: "Lower"
+
+if ideo_group "Right" then this variable should take the values:
+
+-   climate: "Lower"
+
+-   adoption: "Higher"
+
+-   punishment: "Higher"
+
+-   gender: "Lower"
+
+-   discrimination: "Higher"
+
+-   immigration: "Higher"
+
+-   Random placeholders for non-political
+
+    -   teaculture: "Higher"
+
+    -   brain: "Higher"
+
+    -   cats: "Higher"
+
+If ideo_group == "Moderate" then this variable should take the values:
+
+-   "Neutral"
+
+```{r ideo-motive-calc}
+# Collapse ideology into groups
+data_motives <- data_motives %>%
+  mutate(
+    ideo_group = case_when(
+      ideology %in% c("Extremely left", "Left", "Slightly left") ~ "Left",
+      ideology %in% c("Extremely right", "Right", "Slightly right") ~ "Right",
+      ideology == "Moderate" ~ "Moderate"
+    )
+  )
+
+# Create ideo_strength variable
+data_motives <- data_motives %>%
+  mutate(
+    ideo_strength = case_when(
+      ideology %in% c("Slightly left", "Slightly right") ~ 1,
+      ideology %in% c("Left", "Right") ~ 2,
+      ideology %in% c("Extremely left", "Extremely right") ~ 3,
+      ideology == "Moderate" ~ NA_integer_ 
+    )
+  )
+
+# Create ideo_m_topic variables
+data_motives <- data_motives %>%
+  mutate(
+    ideo_m_climate = case_when(
+      ideo_group == "Left" ~ "Higher",
+      ideo_group == "Right" ~ "Lower",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_adoption = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_punishment = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_gender = case_when(
+      ideo_group == "Left" ~ "Higher",
+      ideo_group == "Right" ~ "Lower",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_discrimination = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_immigration = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_teaculture = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_brain = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+    ideo_m_cats = case_when(
+      ideo_group == "Left" ~ "Lower",
+      ideo_group == "Right" ~ "Higher",
+      ideo_group == "Moderate" ~ "Neutral"
+    ),
+  )
+```
+
+### Code performance default motive
+
+The default motive for performance questions is "Higher" (due to self-enhancement bias).
+
+```{r add-performance-motive}
+data_motives <- data_motives %>% 
+  mutate(self_m_enhancement = "Higher")
+```
+
+### Data checks
+
+##### General descriptive checks
+
+Demographics
+
+```{r datasummary-cat}
+data_motives %>% 
+  select(gender, age_group, worksit, education, edu_group, 
+         ideology, partisanship, crt_correct, attention_check, attention_start, attention_end) %>% 
+  mutate(across(everything(), as.factor)) %>% 
+  datasummary_skim(type = "categorical")
+
+# save it
+data_motives %>% 
+  select(gender, age_group, worksit, education, edu_group, 
+         ideology, partisanship, crt_correct, attention_check, attention_start, attention_end) %>% 
+  mutate(across(everything(), as.factor)) %>% 
+  datasummary_skim(type = "categorical") %>% 
+  save_tt(here("03_output", "tables", "questionnaire_factors_check.docx"), overwrite = TRUE)
+```
+
+Some participants reported not having been attentive. Let's check which they are:
+
+```{r attention_start_end}
+data_motives %>% 
+  filter(attention_start != "Yes" | attention_end != "Yes") %>% 
+  select(subj_idx, `Participant Private ID`, age_corrected, ideology, 
+         attention_start, attention_end) %>% 
+  tt()
+```
+
+Continuous variables
+
+```{r datasumary-scales}
+data_motives %>% 
+  select(age_corrected, conservative_rating:reform_rating, 
+         crt_correct, dogmatism, affective_polarisation) %>% 
+  datasummary_skim(type = "numeric") 
+
+
+# save it
+data_motives %>% 
+  select(age_corrected, conservative_rating:reform_rating, 
+         crt_correct, dogmatism, affective_polarisation) %>% 
+  datasummary_skim(fun_numeric = list(Mean = Mean, 
+                                      SD = SD, Min = Min, 
+                                      Median = Median, 
+                                      Max = Max
+                                      )) %>% 
+  save_tt(here("03_output", "tables", "questionnaire_continuous_check.docx"), overwrite = TRUE)
+```
+
+Issue motive variables
+
+```{r datasummary-issue-motives}
+data_motives %>% 
+  select(m_climate:s_cats) %>% 
+  datasummary_skim(type = "categorical")
+```
+
+Ideology motive variables
+
+```{r datasumary-ideology-motives}
+data_motives %>% 
+  select(ideo_strength:ideo_m_immigration) %>% 
+  datasummary_skim(type = "categorical")
+```
+
+##### Correlations
+
+```{r corr-plot, fig.width=12, fig.height=12}
+# select and rename data
+corr_data <- data_motives %>% 
+  mutate(across(
+    .cols = c(gender, edu_group, ideology, o_immigration:o_brain, o_discrimination:o_gender),  
+    .fns = ~ as.numeric(.x)  # Conversion to numeric
+  )) %>% 
+  select(age_corrected, gender, edu_group, ideology, conservative_rating:reform_rating,
+         o_immigration:o_brain, o_discrimination:o_gender, crt_correct, 
+         dogmatism, affective_polarisation)
+
+# correlation analysis
+corrs <- cor(corr_data)
+corrs_p <- cor.mtest(corr_data, conf.level = 0.95)
+
+# plot it 
+col <- colorRampPalette(c("#4477AA", "#77AADD", "#FFFFFF", "#EE9988", "#BB4444"))
+corrplot(corrs, method="color", col=col(200),  
+         type="upper", order="original", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, # Text label color and rotation,
+         #p.mat = corrs_p$p, sig.level = 0.05, insig = "blank", 
+         diag=FALSE, number.cex=0.85 
+         )
+```
+
+```{r}
+# save it
+png(filename = here("03_output", "figures", "questionnaire_correlation_plot.png"), width = 12, height = 12, units = "in", res = 300)
+
+corrplot(corrs, method="color", col=col(200),  
+         type="upper", order="original", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, # Text label color and rotation,
+         #p.mat = corrs_p$p, sig.level = 0.05, insig = "blank", 
+         diag=FALSE, number.cex=0.85 
+         )
+
+dev.off()
+```
+
+### Save data frames
+
+I will save two data frames. One includes all variables that are in data_motives, including all individual items. The other data frame only includes the items that I need for further analyses.
+
+```{r selected-data}
+data_sel <- data_motives %>% 
+  select(subj_idx, `Participant Private ID`, 
+         age_corrected, age_group, gender, worksit, education, edu_group, 
+         ideology, ideology_num, partisanship, conservative_rating:reform_rating, 
+         questionnaire_attention_check, attention_start, attention_end, 
+         crt_correct, dogmatism:self_m_enhancement)
+```
+
+```{r save-csv-data}
+# selected data
+write_csv(data_sel, here("01_data", "scored", 
+                         "data_questionnaire_scores_sel.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# full data
+write_csv(data_motives, here("01_data", "scored", 
+                             "data_questionnaire_scores_all.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+```

@@ -1,0 +1,498 @@
+---
+title: "Gorilla to Tidy Data: Cognitive Control and Motivated Reasoning"
+description: "Data cleaning, data checks, and some preparations for further analyses."
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=F, message=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "tinytable"     # Lightweight package to create tables
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+## Load the data
+
+I have data from different versions of the tasks and questionnaires. The following code automatically loads them from the specified path and renames them with the task \| questionnaire identifier.
+
+```{r load-data, output=FALSE}
+# Define the path to stored raw data
+raw_dir <- here("01_data", "raw") 
+
+# List all CSV files in the folder
+raw_files_list <- list.files(path = raw_dir, pattern = "*.csv", full.names = TRUE)
+
+# Function to read a CSV file and assign it to a dataframe with the desired name
+read_and_assign_simple <- function(file) {
+  # Extract parts of the file name
+  file_name <- basename(file)
+  parts <- str_match(file_name, "data_exp_.*_(questionnaire|task)-(.*)\\.csv")
+  task_or_questionnaire <- parts[2]
+  identifier <- parts[3]
+  
+  # Create the new name
+  new_name <- paste0("data_", task_or_questionnaire, "_", identifier)
+  
+  # Read the CSV file
+  df <- read_csv(file)
+  
+  # Filter out rows where "Participant Private ID" is NA
+  df <- df %>% filter(!is.na(`Participant Private ID`))
+  
+  # Assign the dataframe to the new name in the global environment
+  assign(new_name, df, envir = .GlobalEnv)
+}
+
+# Apply the function to all files
+map(raw_files_list, read_and_assign_simple)
+```
+
+## Data cleaning
+
+In this section, I want to remove any unnecessary rows and columns and rename the dataframes with something more intuitive.
+
+I start by creating a tibble that matches each task/questionnaire identifier with a name.
+
+```{r data-naming-tibble}
+identifier_names <- tribble(
+  ~identifier, ~name,
+  "svnz", "consent",
+  "av22", "questionnaire_pre",
+  "uamn", "go_nogo_m",
+  "8o8a", "go_nogo_p",
+  "yknh", "fake_news_game",
+  "nn4b", "debrief"
+)
+
+identifier_names %>% 
+  tt(theme = "striped")
+```
+
+### Select, filter, and rename variables
+
+#### Consent (svnz)
+
+```{r consent-select}
+data_consent <- data_questionnaire_svnz %>% select(
+  `Participant Private ID`,
+  `UTC Date and Time`,
+  `Experiment Version`,
+  `Participant Device`,
+  `Participant Browser`,
+  `randomiser-evbs`,
+  `attention_start object-14 Response`:`recontact object-19 Quantised`)
+```
+
+```{r consent-rename}
+data_consent <- data_consent %>% 
+  rename(
+    consent1 = `Consent Form object-17 I confirm that I have read and understood the information sheet about the study.
+-I Agree
+`,
+    consent2 = `Consent Form object-17 I understand that my participation is voluntary and that I am free to withdraw from the study at any time, without giving a reason.
+-I Agree
+`,
+    consent3 = `Consent Form object-17 I agree for my (non-identifiable) data to be uploaded into a public depository for scientific purposes.
+-I Agree
+`,
+    consent4 = `Consent Form object-17 I agree to take part in this study.
+-I Agree
+`,
+    attention_start = `attention_start object-14 Response`,
+    recontact = `recontact object-19 Response`
+  )
+```
+
+#### Questionnaires (av22)
+
+```{r questionnaire-pre-select}
+data_questionnaires <- data_questionnaire_av22 %>% 
+  select(
+    `Participant Private ID`,
+    `age object-18 Month`:`dog11 object-131 Quantised`,
+    -contains("Quantised"))
+```
+
+```{r questionnaire-pre-rename}
+data_questionnaires <- data_questionnaires %>% 
+  rename(age_month = `age object-18 Month`,
+         age_year = `age object-18 Year`,
+         gender = `gender object-6 Response`,
+         gender_other = `gender object-6 Other`,
+         worksit = `worksit object-19 Response`,
+         worksit_other = `worksit object-19 Other`,
+         education = `education object-11 Response`,
+         education_other = `education object-11 Other`,
+         ideology = `ideology object-38 Response`,
+         partisanship = `partisanship object-23 Response`,
+         partisanship_other = `partisanship object-23 Other`,
+         conservative_rating = `conservative object-24 Value`,
+         labour_rating = `labour object-27 Value`,
+         libdem_rating = `libdem object-28 Value`,
+         green_rating = `green object-29 Value`,
+         reform_rating = `reform object-30 Value`,
+         crt1 = `CRT1 object-31 Value`,
+         crt2 = `CRT2 object-33 Value`,
+         crt3 = `CRT3 object-35 Value`,
+         o_immigration = `immigration object-91 Response`,
+         o_climate = `climate object-92 Response`,
+         o_punishment = `punishment object-93 Response`,
+         o_teaculture = `teaculture object-94 Response`,
+         o_brain = `brain object-96 Response`,
+         attention_check = `attention object-97 Response`,
+         o_discrimination = `discrimination object-107 Response`,
+         o_cats = `cats object-108 Response`,
+         o_selfenhancement = `selfenhancement object-109 Response`,
+         o_adoption = `adoption object-110 Response`,
+         o_gender = `gender object-111 Response`,
+         dog01 = `dog01 object-112 Response`,
+         dog02 = `dog02 object-113 Response`,
+         dog03 = `dog03 object-114 Response`,
+         dog04 = `dog04 object-115 Response`,
+         dog05 = `dog05 object-116 Response`,
+         dog06 = `dog06 object-117 Response`,
+         dog07 = `dog07 object-127 Response`,
+         dog08 = `dog08 object-128 Response`,
+         dog09 = `dog09 object-129 Response`,
+         dog10 = `dog10 object-130 Response`,
+         dog11 = `dog11 object-131 Response`
+         )
+```
+
+#### Go / No-Go M Start (uamn)
+
+```{r go-nogo-m-select}
+data_gng_m_sel <- data_task_uamn %>% 
+  select(
+    `Participant Private ID`,
+    `UTC Date and Time`,
+    `Experiment Version`,
+    `Participant Device`,
+    `Participant Browser`,
+    `Task Name`,
+    `randomiser-evbs`,
+    `Event Index`,
+    `Trial Number`,
+    Screen,
+    `Component Name`,
+    `Object Name`,
+    `Response Type`,
+    Response,
+    `Reaction Time`,
+    Correct,
+    `Spreadsheet: stimulus`:`Spreadsheet: trial_id`,
+    Display,
+  )
+```
+
+```{r go-nogo-m-rename}
+data_gng_m_sel <- data_gng_m_sel %>% 
+  rename(
+    response = Response,
+    rt = `Reaction Time`,
+    correct = Correct,
+    stimulus = `Spreadsheet: response`,
+    letter = `Spreadsheet: stimulus`,
+    condition = Display,
+    trial_id = `Spreadsheet: trial_id`,
+  )
+```
+
+```{r go-nogo-m-filter}
+data_gng_m <- data_gng_m_sel %>% 
+  filter(`Response Type` == "response")
+```
+
+#### Go / No-Go P Start (8o8a)
+
+```{r go-nogo-p-select}
+data_gng_p_sel <- data_task_8o8a %>% 
+  select(
+    `Participant Private ID`,
+    `UTC Date and Time`,
+    `Experiment Version`,
+    `Participant Device`,
+    `Participant Browser`,
+    `Task Name`,
+    `randomiser-evbs`,
+    `Event Index`,
+    `Trial Number`,
+    Screen,
+    `Component Name`,
+    `Object Name`,
+    `Response Type`,
+    Response,
+    `Reaction Time`,
+    Correct,
+    `Spreadsheet: stimulus`:`Spreadsheet: trial_id`,
+    Display,
+  )
+```
+
+```{r go-nogo-p-rename}
+data_gng_p_sel <- data_gng_p_sel %>% 
+  rename(
+    response = Response,
+    rt = `Reaction Time`,
+    correct = Correct,
+    stimulus = `Spreadsheet: response`,
+    letter = `Spreadsheet: stimulus`,
+    condition = Display,
+    trial_id = `Spreadsheet: trial_id`,
+  )
+```
+
+```{r go-nogo-p-filter}
+data_gng_p <- data_gng_p_sel %>% 
+  filter(`Response Type` == "response")
+```
+
+#### Fake News Game (yknh)
+
+```{r fake-news-select}
+data_fake_news_sel <- data_task_yknh %>% 
+  select(
+    `Participant Private ID`,
+    `UTC Date and Time`,
+    `Experiment Version`,
+    `Participant Device`,
+    `Participant Browser`,
+    `Task Name`,
+    `Task Version`,
+    `Trial Number`,
+    Display,
+    `Response Type`,
+    `Component Name`,
+    Screen,
+    Tag,
+    `Reaction Time`,
+    `Spreadsheet: task`,
+    `Spreadsheet: identifier`,
+    `Spreadsheet: question`,
+    `Spreadsheet: name`,
+    `Spreadsheet: type`,
+    Response,
+    `Spreadsheet: message`,
+    `Spreadsheet: correct_answer`,
+    Correct,
+    `Response Duration`,
+  )
+```
+
+```{r fake-news-rename}
+data_fake_news_sel <- data_fake_news_sel %>% 
+  rename(rt = `Reaction Time`,
+         trial_type = `Spreadsheet: task`,
+         trial_id = `Spreadsheet: identifier`,
+         question_type = `Spreadsheet: type`,
+         question_topic = `Spreadsheet: name`,
+         question = `Spreadsheet: question`,
+         response = Response,
+         message = `Spreadsheet: message`,
+         correct_answer = `Spreadsheet: correct_answer`,
+         guess_correct = Correct,
+         response_duration = `Response Duration`
+         )
+```
+
+```{r fake-news-filter}
+data_fake_news <- data_fake_news_sel %>% 
+  filter(`Response Type` == "response")
+```
+
+#### Debrief (nn4b)
+
+```{r debrief-select}
+data_debrief <- data_questionnaire_nn4b %>% 
+  select(`Participant Private ID`,
+         `attention_end object-3 Response`)
+```
+
+```{r debrief-rename}
+data_debrief <- data_debrief %>% 
+  rename(
+    attention_end = `attention_end object-3 Response`
+  )
+```
+
+### Join relevant data frames
+
+```{r join-questionnaires}
+dfs <- list(data_consent, data_questionnaires, data_debrief)
+
+# join all dfs
+data_questionnaires_combined <- 
+  reduce(dfs, full_join, by = "Participant Private ID")
+
+head(data_questionnaires_combined) %>% 
+  tt()
+```
+
+```{r join-go-nogo}
+data_gng <- bind_rows(data_gng_m, data_gng_p)
+
+head(data_gng) %>% 
+  tt()
+```
+
+### Remove participants who failed attention check
+
+As pre-registered, I remove participants who failed a very obvious attention check right at the beginning of the study. One participant had to be removed due to ethical reasons as they incorrectly indicated their age on Prolific.
+
+```{r check-attention}
+data_questionnaires %>% 
+  filter(attention_check != "Strongly agree") %>% 
+  select(`Participant Private ID`, age_year, ideology) %>% 
+  tt()
+```
+
+```{r failed-attention}
+data_gng_f <- data_gng %>% 
+  filter(!(`Participant Private ID` %in% c(11693689, 11700313)))
+
+data_fake_news_f <- data_fake_news %>% 
+  filter(!(`Participant Private ID` %in% c(11693689, 11700313)))
+
+data_questionnaires_combined_f <- data_questionnaires_combined %>% 
+  filter(!(`Participant Private ID` %in% c(11693689, 11700313)))
+```
+
+### Check technical errors
+
+```{r check-duplicates-questionnaire}
+data_questionnaires_combined %>%
+  count(`Participant Private ID`) %>% 
+  filter(n != 1)
+```
+
+The questionnaires look good.
+
+```{r check-duplicates-gng}
+data_gng %>% 
+  count(`Participant Private ID`) %>% 
+  filter(n != 300)
+```
+
+For some reason two IDs have not 300 observations which should not happen and is a technical error from Gorilla. As the study was set up, it is not possible to have less or more than 300 trials, and this thus an indication that there was an error and data cannot be used.
+
+```{r check-duplicates-fake-news}
+data_fake_news %>% 
+  count(`Participant Private ID`) %>% 
+  filter(n > 35 | n < 25)
+```
+
+Another two participants have a weird number of observations and need to be removed. This should not happen and again is a technical issue from Gorilla.
+
+#### Remove technical errors
+
+This was not pre-registered, as technical errors outside of the control of the researchers cannot be.
+
+```{r technical-errors}
+data_gng_f <- data_gng_f %>% 
+  filter(!(`Participant Private ID` %in% c(11694557, 11695853, 
+                                           11694792, 11696062)))
+
+data_fake_news_f <- data_fake_news_f %>% 
+  filter(!(`Participant Private ID` %in% c(11694557, 11695853, 
+                                           11694792, 11696062)))
+
+data_questionnaires_combined_f <- data_questionnaires_combined_f %>% 
+  filter(!(`Participant Private ID` %in% c(11694557, 11695853, 
+                                           11694792, 11696062)))
+```
+
+### Check the age of participants
+
+I intended to recruit only 18-38 year olds - we expect some deviation as this is based on Prolific and not all information is always up to date. Let's check if there are some participants that incorrectly stated their age.
+
+```{r check-age}
+data_questionnaires_combined_f %>% 
+  filter(age_year < 18 | age_year > 38) %>% 
+  select(`Participant Private ID`, age_year)
+```
+
+I am not super concered about the participants who are slightly above 38. However, the others, I contacted on Prolific. Two of them could correct their age and reported the following ages:
+
+-   11695048 –\> 38
+-   11694382 -\> 38
+
+So let's create a age variable that takes the age in years for all participants, but for these two uses the corrected values.
+
+```{r correct-age}
+data_questionnaires_combined_f <- data_questionnaires_combined_f %>%
+  mutate(age_year = as.numeric(age_year)) %>% 
+  mutate(age_corrected = case_when(
+    `Participant Private ID` == 11695048 ~ 38,
+    `Participant Private ID` == 11694382 ~ 38,
+    TRUE ~ age_year  
+  )) 
+```
+
+### Demographics of filtered participants
+
+```{r filtered_demographics}
+data_questionnaires_combined %>% 
+  filter(`Participant Private ID` %in% c(11693689, 11700313,
+                                         11694557, 11695853, 
+                                         11694792, 11696062)) %>% 
+  select(`Participant Private ID`, `Participant Browser`, ideology,
+         age_year) %>% 
+  tt()
+```
+
+This leaves us with the final pre-registered sample size of exactly *N* = 504 participants.
+
+## Save dataframes
+
+Save different .csv data frames for further analyses.
+
+```{r create-dir, include=FALSE}
+dir <- (here("01_data","cleaned"))
+dir.create(dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+```{r save-csv-data}
+# questionnaire data
+write_csv(data_questionnaires_combined_f, here("01_data", "cleaned", "data_questionnaires_cleaned.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# gng data
+write_csv(data_gng_f, here("01_data", "cleaned", "data_gng_cleaned.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# fake news task data
+write_csv(data_fake_news_f, here("01_data", "cleaned", "data_fake_news_cleaned.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+```

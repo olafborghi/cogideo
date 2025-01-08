@@ -1,0 +1,835 @@
+---
+title: "Fake-News Task Preparations: Cognitive Control and Motivated Reasoning"
+description: "Data cleaning, data checks, and some preparations for further analyses, in particular based on the Fake News Game."
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=F, message=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "tinytable",    # Lightweight package to create tables
+          "modelsummary", # Data and model summaries with tables and plots
+          "pandoc",       # Required for saving tables as docx
+          "hrbrthemes",   # Additional ggplot themes
+          "showtext",     # So that fonts also work on mac
+          "extrafont",    # Additional fonts for plots etc
+          "patchwork"     # Combine ggplot objects
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  # Load local font, make sure path is correct
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed")
+  font_add(family = "Roboto Condensed Light", regular = "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r colors, include=FALSE}
+# devtools needs to be installed: install.packages("devtools")
+devtools::install_github("dill/beyonce")
+library(beyonce)
+
+bp <- beyonce_palette(41, n = 9, type = "continuous")
+```
+
+## Data Preparations
+
+```{r load-data, include=FALSE}
+# read fake news data
+data_raw <- read_csv(here("01_data", "cleaned", 
+                          "data_fake_news_cleaned.csv"))
+
+# read questionnaire data
+questionnaire_data <- read_csv(here("01_data", "scored", 
+                           "data_questionnaire_scores_sel.csv"))
+
+# read gng data
+gng_data <- read_csv(here("01_data", "scored", "data_gng_scores.csv"))
+
+# read the subj_idx to id table
+id_table <- read_csv(here("01_data", "private_id_to_subj_idx.csv"))
+```
+
+Add the same subj_idx as from the gng_task to the raw data.
+
+```{r add-subj-idx}
+data_raw <- data_raw %>%
+  left_join(id_table, by = "Participant Private ID")
+
+# check if it worked
+id_check <- data_raw %>%
+  select(`Participant Private ID`, subj_idx) %>%
+  distinct() 
+
+id_check %>% 
+  full_join(id_table, by = "Participant Private ID") %>% 
+  head()
+```
+
+## Data Check & First Variable Calculations
+
+How many guesses were correct? I also create a new variable that will allow us to filter out these rows later.
+
+```{r correct-guesses, results='hide'}
+data_cal <- data_raw %>%
+  mutate(is_correct = case_when(
+    Screen == "Question" & !is.na(correct_answer) ~ as.numeric(response) == as.numeric(correct_answer),
+    TRUE ~ NA_real_
+  )) 
+
+data_cal %>% 
+  filter(is_correct == T) %>% 
+  select(subj_idx, question_topic, response, correct_answer, guess_correct) %>% 
+  tt()
+
+sum(data_cal$is_correct, na.rm = T)
+
+data_cal <- data_cal %>% 
+  group_by(subj_idx, question_topic) %>%
+  fill(is_correct, .direction = "downup") %>%  
+  ungroup()
+```
+
+Did participants pass the Fake News attention check?
+
+```{r task-attention-check}
+# Create task_attention_check variable for attention check responses
+data_cal <- data_cal %>%
+  mutate(
+    task_attention_check = case_when(
+      question_topic == "attention01" & response != "2024" ~ "failed",
+      question_topic == "attention01" & response == "2024" ~ "passed"
+    )
+  )
+
+# Check the variable for each participant
+task_attention_check_summary <- data_cal %>%
+  filter(question_topic == "attention01") %>%
+  select(subj_idx, task_attention_check)
+
+# Apply it to all cases of said participant
+data_cal <- data_cal %>%
+  select(-task_attention_check) %>% 
+  left_join(task_attention_check_summary, by = "subj_idx")
+```
+
+Calculate the number of participants who failed it
+
+```{r calc-failed-task-att}
+data_cal %>% 
+  distinct(subj_idx, task_attention_check) %>%
+  group_by(task_attention_check) %>% 
+  summarise(count = n()) %>% 
+  tt()
+```
+
+And print the response that the participants gave who failed the check
+
+```{r print-responses-failed}
+data_cal %>% 
+  filter(question_topic == "attention01" & task_attention_check == "failed") %>% 
+  select(subj_idx, response, correct_answer, task_attention_check) %>% 
+  tt()
+```
+
+Participant 409 followed up in a Prolific indicated in "Other" at the end that they incorrectly typed the answer.
+
+### Calculate Variable for Round
+
+I want to create a variable that indicates which question was shown at which round from 1-10 (excluding "practice" and "attention").
+
+```{r calc-round-variable}
+# Create the round variable
+data_cal <- data_cal %>%
+  group_by(subj_idx) %>%
+  mutate(
+    trial_round = case_when(
+      trial_id == "practice01" ~ "practice",
+      trial_id == "attention01" ~ "attention",
+      TRUE ~ as.character(cumsum(trial_id != lag(trial_id, default = first(trial_id)) & trial_id != "practice01" & trial_id != "attention01"))
+    )
+  ) %>%
+  ungroup()
+
+data_cal %>% 
+  select(subj_idx, trial_id, trial_round) %>% 
+  head(30) %>% 
+  tt()
+```
+
+## Data Cleaning
+
+### Join the dataframes
+
+```{r join-questionnaire-gng-dfs}
+# combine questionnaire with gng scores
+data_combined <- questionnaire_data %>% 
+  left_join(gng_data, by = "subj_idx")
+```
+
+```{r join-combined-with-fake-news-dfs}
+data_full <- data_cal %>% 
+  left_join(data_combined, by = c("Participant Private ID", "subj_idx"))
+```
+
+### Select and filter analysis variables
+
+```{r select-analysis-vars}
+data_sel <- data_full %>% 
+  select(subj_idx,
+         age_corrected, age_group, gender, edu_group, 
+         ideology, ideology_num, partisanship, conservative_rating:reform_rating,
+         crt_correct, dogmatism, affective_polarisation, 
+         commission_errors:rt_nogo_avg, Screen,
+         trial_round, trial_id, trial_type, 
+         question_type, question_topic, question, message,
+         response, rt, correct_answer, is_correct,
+         m_climate:self_m_enhancement,
+         task_attention_check, questionnaire_attention_check, 
+         attention_start, attention_end
+         )
+```
+
+```{r filter-analysis-vars}
+data_fil <- data_sel
+
+# Filter out unneeded screens
+initial_rows <- nrow(data_fil)
+data_fil <- data_fil %>% filter(!Screen %in% c("Assumption-Check", "News Challenge", "Practice Start", "Feedback Less Than", "Feedback More Than"))
+removed_screens <- initial_rows - nrow(data_fil)
+
+# Filter out rows where is_correct is TRUE (but not NA) 
+initial_rows <- nrow(data_fil)
+data_fil <- data_fil %>% filter(!is_correct %in% TRUE)
+removed_is_correct <- initial_rows - nrow(data_fil)
+
+# Create a tibble with the filter information, including duplicate filter
+filter_info <- tibble::tibble(
+  Filter = c(
+    "Rows removed by unnecessary screens",
+    "Rows removed by 'is_correct != TRUE'"
+  ),
+  n = c(
+    removed_screens,
+    removed_is_correct
+  )
+)
+
+filter_info %>% 
+  tt()
+```
+
+```{r quick-check1}
+data_fil %>%
+  group_by(subj_idx, question_type) %>% 
+  summarize(count = n(), .groups = 'drop') %>%
+  arrange(subj_idx, question_type) %>% 
+  head(20) %>% 
+  tt()
+```
+
+```{r quick-check2}
+data_fil %>% 
+  count(subj_idx) %>% 
+  filter(n < 15 | n > 25)
+```
+
+### Calculate True / Fake Message
+
+Before we can calculate whether a message was true or fake, we need to calculate the correct answers for the performance questions from the data.
+
+#### Code correct answer for the performance questions
+
+-   For Go / No-Go I will use 56 - commission errors of each participant, select 100 random participants, and calculate the rank order that each given participant would have within them.
+
+```{r}
+set.seed(42)
+
+gng_correct_answer <- data_fil %>%
+  filter(Screen == "Question", question_topic == "gonogo_performance") %>%
+  select(subj_idx, commission_errors) %>%
+  mutate(gng_performance_score = 56 - commission_errors)
+
+gng_correct_answers <- gng_correct_answer %>%
+  rowwise() %>%
+  mutate(
+    correct_answer = {
+      # Sample 100 other participants, excluding the current one
+      other_participants <- sample(setdiff(gng_correct_answer$subj_idx, subj_idx), 100)
+      
+      # Get the scores of those 100 participants
+      other_scores <- gng_correct_answer %>%
+        filter(subj_idx %in% other_participants) %>%
+        pull(gng_performance_score)
+      
+      # Calculate how many of the 100 participants the current one outperformed
+      sum(gng_performance_score > other_scores)
+    }
+  ) %>%
+  ungroup()
+
+gng_correct_answers %>% 
+  tt()
+```
+
+And now add those correct_answers back to our data
+
+```{r}
+data_fil <- data_fil %>%
+  left_join(
+    gng_correct_answers %>% select(subj_idx, correct_answer),
+    by = "subj_idx"
+  ) %>%
+  mutate(
+    correct_answer = if_else(
+      question_topic == "gonogo_performance",
+      correct_answer.y, 
+      correct_answer.x
+    )
+  ) %>%
+  select(-correct_answer.x, -correct_answer.y)
+```
+
+-   For the Fake News task I will calculate the squared sum of errors sum(guess - correct_answer)\^2 of each participant, then select 100 random participants, and calculate the rank order of each participant within them.
+
+```{r}
+# Calculate the squared sum of errors for each participant 
+fakenews_performance <- data_fil %>%
+  mutate(
+    response = as.numeric(response),
+    correct_answer = as.numeric(correct_answer)
+  ) %>% 
+  filter(Screen == "Question", 
+         !question_topic %in% c("gonogo_performance", "fakenews_performance", "cats")) %>%
+  group_by(subj_idx) %>%
+  summarise(
+    squared_sum_errors = sum((response - correct_answer)^2, na.rm = F)
+  )
+
+fakenews_performance %>% 
+  tt()
+```
+
+```{r}
+set.seed(42)
+
+fakenews_performance_answers <- fakenews_performance %>%
+  rowwise() %>%
+  mutate(
+    correct_answer = {
+      # Sample 100 other participants, excluding the current one
+      other_participants <- sample(setdiff(fakenews_performance$subj_idx, subj_idx), 100)
+      
+      # Get the scores of those 100 participants
+      other_scores <- fakenews_performance %>%
+        filter(subj_idx %in% other_participants) %>%
+        pull(squared_sum_errors)
+      
+      # Calculate how many of the 100 participants the current one outperformed
+      sum(squared_sum_errors < other_scores) # Lower squared_sum_errors means better performance
+    }
+  ) %>%
+  ungroup()
+
+fakenews_performance_answers %>% 
+  select(subj_idx, squared_sum_errors, correct_answer) %>% 
+  tt()
+```
+
+```{r}
+# Join it with our data
+data_fil <- data_fil %>%
+  left_join(
+    fakenews_performance_answers %>% select(subj_idx, correct_answer),
+    by = "subj_idx"
+  ) %>%
+  mutate(
+    correct_answer = if_else(
+      question_topic == "fakenews_performance",
+      correct_answer.y, 
+      correct_answer.x
+    )
+  ) %>%
+  select(-correct_answer.x, -correct_answer.y)
+```
+
+#### Calculate True / Fake
+
+A message is True, if (for Screen == Question)
+
+-   response \< correct_answer & message == "greater than"
+
+-   response \> correct_answer & message == "less than"
+
+A message is Fake, if (for Screen == Question)
+
+-   response \> correct_answer & message == "greater than"
+
+-   response \< correct_answer & message == "less than"
+
+```{r calc-news_source}
+data_fil <- data_fil %>%
+  mutate(news_source = case_when(
+    Screen == "Question" & response < correct_answer & message == "greater than" ~ "True",
+    Screen == "Question" & response > correct_answer & message == "less than" ~ "True",
+    Screen == "Question" & response > correct_answer & message == "greater than" ~ "Fake",
+    Screen == "Question" & response < correct_answer & message == "less than" ~ "Fake",
+    TRUE ~ NA_character_  
+  ))
+
+data_fil <- data_fil %>%
+  group_by(subj_idx, question_topic) %>%
+  fill(news_source, .direction = "downup") %>%
+  ungroup()
+```
+
+Transform into a factor with two levels (True and Fake)
+
+```{r news_source_factor}
+data_fil <- data_fil %>% 
+  mutate(news_source = factor(news_source, levels = c("Fake", "True")))
+```
+
+Check if all worked as planned
+
+```{r quick-source-check}
+data_fil %>% 
+  filter(Screen == "Question") %>% 
+  select(subj_idx, question_topic, response, 
+         correct_answer, message, news_source) %>% 
+  head(40) %>% 
+  tt(theme = "striped")
+```
+
+```{r descriptives-source}
+data_fil %>% 
+  select(news_source) %>% 
+  datasummary_skim(., type = "categorical")
+```
+
+### Calculate Pro / Anti Message based on Issue Motive
+
+A message is Pro, if
+
+-   message == "less than" and motive for this topic == "Lower"
+
+-   message == "greater than" and motive for this topic == "Higher"
+
+A message is Anti, if
+
+-   message == "less than" and motive for this topic == "Higher"
+
+-   message == "greater than" and motive for this topic == "Lower"
+
+Irrespective of the message, if the issue_motive == "Neutral" it stays neutral
+
+```{r calc-issue-motives}
+data_dir <- data_fil %>%
+  mutate(issue_direction = case_when(
+    question_topic == "climate" ~ m_climate,
+    question_topic == "adoption" ~ m_adoption,
+    question_topic == "punishment" ~ m_punishment,
+    question_topic == "cats" ~ m_cats,
+    question_topic == "teaculture" ~ m_teaculture,
+    question_topic == "brain" ~ m_brain,
+    question_topic == "gender" ~ m_gender,
+    question_topic == "discrimination" ~ m_discrimination,
+    question_topic == "immigration" ~ m_immigration,
+    question_topic == "gonogo_performance" ~ m_selfenhancement,
+    question_topic == "fakenews_performance" ~ m_selfenhancement,
+    TRUE ~ NA_character_
+  ))
+
+data_mot <- data_dir %>%
+  mutate(issue_motive = case_when(
+    message == "less than" & issue_direction == "Lower" ~ "Pro",
+    message == "greater than" & issue_direction == "Higher" ~ "Pro",
+    message == "less than" & issue_direction == "Higher" ~ "Anti",
+    message == "greater than" & issue_direction == "Lower" ~ "Anti",
+    issue_direction == "Neutral" ~ "Neutral",
+    TRUE ~ NA_character_
+  ))
+```
+
+Transform into a factor with three levels (Anti, Neutral, Pro)
+
+```{r issue-motive-factor}
+data_mot <- data_mot %>% 
+  mutate(issue_motive = factor(issue_motive, levels = c("Anti", "Neutral", "Pro")))
+```
+
+Check if this worked
+
+```{r quick-issue-motive-check}
+data_mot %>% 
+  filter(question_topic == "immigration") %>% 
+  select(subj_idx, question_topic, message, m_immigration, issue_motive) %>% 
+  tt(theme = "striped")
+```
+
+```{r descriptives-issue-motive}
+data_mot %>% 
+  select(issue_motive) %>% 
+  datasummary_skim(., type = "categorical")
+```
+
+```{r quick-mean-check}
+data_mot %>%
+  group_by(question_topic, issue_motive) %>%
+  filter(Screen != "Question") %>% 
+  summarize(mean_response = mean(as.numeric(response), na.rm = TRUE)) %>% 
+  tt()
+```
+
+And now also create a table for news_source x issue_motive
+
+```{r balance-table-source-issue-motive}
+datasummary_crosstab(issue_motive ~ news_source, data = data_mot)
+```
+
+### Add the motive strength
+
+```{r add-issue_strength}
+data_mot <- data_mot %>%
+  mutate(issue_strength = case_when(
+    question_topic == "climate" ~ s_climate,
+    question_topic == "adoption" ~ s_adoption,
+    question_topic == "punishment" ~ s_punishment,
+    question_topic == "teaculture" ~ s_teaculture,
+    question_topic == "brain" ~ s_brain,
+    question_topic == "gender" ~ s_gender,
+    question_topic == "discrimination" ~ s_discrimination,
+    question_topic == "immigration" ~ s_immigration,
+    question_topic == "fakenews_performance" ~ s_selfenhancement,
+    question_topic == "gonogo_performance" ~ s_selfenhancement,
+    question_topic == "cats" ~ s_cats,
+    TRUE ~ NA_real_  
+  ))
+```
+
+Check if this worked
+
+```{r quick-motive-strength-check}
+data_mot %>% 
+  filter(question_topic == "climate") %>% 
+  select(subj_idx, question_topic, message, 
+         m_climate, issue_motive, s_climate, issue_strength) %>% 
+  tt(theme = "striped")
+```
+
+### Create a combined issue_motive_strength variable
+
+```{r}
+data_mot <- data_mot %>% 
+  mutate(issue_motive_strength = case_when(
+    issue_motive == "Anti" & issue_strength == 2 ~ "Anti-strong",
+    issue_motive == "Anti" & issue_strength == 1 ~ "Anti-moderate",
+    issue_motive == "Pro" & issue_strength == 2 ~ "Pro-strong",
+    issue_motive == "Pro" & issue_strength == 1 ~ "Pro-moderate",
+    issue_motive == "Neutral" ~ "Neutral",
+    TRUE ~ NA_character_
+  ))
+```
+
+And check if this worked:
+
+```{r}
+data_mot %>% 
+  filter(question_topic == "climate") %>% 
+  select(subj_idx, question_topic, message, 
+         issue_motive, issue_strength, issue_motive_strength) %>% 
+  tt(theme = "striped")
+```
+
+### Calculate Pro / Anti Message based on Ideology & Self-Enhancement Motive
+
+Now, I want to code the variable ideo_motive. This one is very similar to issue_motive, but rather than calculating the motives from specific opinion questions on each topic, this one uses the Left / Right ideology item. For selfenhancement, it uses the default instead. For the neutral vignettes, I use the arbitrary placeholder.
+
+```{r calc-ideo-motive}
+data_mot <- data_mot %>%
+  mutate(ideo_direction = case_when(
+    question_topic == "climate" ~ ideo_m_climate,
+    question_topic == "adoption" ~ ideo_m_adoption,
+    question_topic == "punishment" ~ ideo_m_punishment,
+    question_topic == "cats" ~ ideo_m_cats,
+    question_topic == "teaculture" ~ ideo_m_teaculture,
+    question_topic == "brain" ~ ideo_m_brain,
+    question_topic == "gender" ~ ideo_m_gender,
+    question_topic == "discrimination" ~ ideo_m_discrimination,
+    question_topic == "immigration" ~ ideo_m_immigration,
+    question_topic == "gonogo_performance" ~ self_m_enhancement,
+    question_topic == "fakenews_performance" ~ self_m_enhancement,
+    TRUE ~ NA_character_
+  ))
+
+data_mot <- data_mot %>%
+  mutate(ideo_motive = case_when(
+    message == "less than" & ideo_direction == "Lower" ~ "Pro",
+    message == "greater than" & ideo_direction == "Higher" ~ "Pro",
+    message == "less than" & ideo_direction == "Higher" ~ "Anti",
+    message == "greater than" & ideo_direction == "Lower" ~ "Anti",
+    ideo_direction == "Neutral" ~ "Neutral",
+    TRUE ~ NA_character_
+  ))
+```
+
+Transform into a factor with three levels (Anti, Neutral, Pro)
+
+```{r ideo-motive-factor}
+data_mot <- data_mot %>% 
+  mutate(ideo_motive = factor(ideo_motive, levels = c("Anti", "Neutral", "Pro")))
+```
+
+Check if all worked as planned
+
+```{r quick-ideo-motive-check}
+data_mot %>% 
+  filter(question_topic == "immigration") %>% 
+  select(subj_idx, question_topic, message, ideo_m_immigration, ideo_motive) %>% 
+  tt(theme = "striped")
+```
+
+```{r descriptives-ideo-motive}
+data_mot %>% 
+  select(ideo_motive) %>% 
+  datasummary_skim(., type = "categorical")
+```
+
+Quick mean check for this one
+
+```{r}
+data_mot %>%
+  group_by(question_topic, ideo_motive) %>%
+  filter(Screen != "Question") %>% 
+  summarize(mean_response = mean(as.numeric(response), na.rm = TRUE)) %>% 
+  tt()
+```
+
+And now also create a table for news_source x ideo_motive
+
+```{r balance-table-source-ideo-motive}
+datasummary_crosstab(ideo_motive ~ news_source, data = data_mot)
+```
+
+### Add ideo_motive_strength
+
+Note to my future self: You will find that ideo_strength is not NA for the neutral topics. This is based on the way you joined the dfs and NOT an issue. The code below ensures that ideo_motive_strength is NA whenever ideo_motive is NA.
+
+```{r}
+data_mot <- data_mot %>%
+  mutate(ideo_motive_strength = case_when(
+    is.na(ideo_motive) ~ NA_character_,  
+    ideo_motive == "Anti" & ideo_strength == 3 ~ "Anti-strong",
+    ideo_motive == "Anti" & ideo_strength == 2 ~ "Anti-moderate",
+    ideo_motive == "Anti" & ideo_strength == 1 ~ "Anti-weak",
+    ideo_motive == "Pro" & ideo_strength == 3 ~ "Pro-strong",
+    ideo_motive == "Pro" & ideo_strength == 2 ~ "Pro-moderate",
+    ideo_motive == "Pro" & ideo_strength == 1 ~ "Pro-weak",
+    ideo_motive == "Neutral" ~ "Neutral",
+    TRUE ~ NA_character_
+  ))
+```
+
+And check if it all worked as intended:
+
+```{r}
+data_mot %>% 
+  filter(question_topic == "climate") %>% 
+  select(subj_idx, question_topic, message, 
+         ideo_motive, ideo_strength, ideo_motive_strength) %>% 
+  tt(theme = "striped")
+```
+
+### Overlap between issue and ideo motives
+
+Overall overlap
+
+```{r calc-overlap}
+mot_overlap <- data_mot %>%
+  filter(!is.na(issue_motive) & !is.na(ideo_motive) & !question_topic %in% 
+           c("selfenhancement", "brain", "teaculture", "cats")) %>%
+  summarise(same_motive_percentage = mean(issue_motive == ideo_motive) * 100)
+
+tt(mot_overlap)
+```
+
+## Final data frames
+
+#### Full pre-registered analysis data
+
+Create an analysis data frame with all relevant variables of all participants.
+
+```{r select-final-data}
+data_analysis <- data_mot %>% 
+  mutate(response = as.numeric(response),
+         response_proportion = as.numeric(response) / 100,
+         across(where(is.character), as.factor),
+         issue_motive = factor(issue_motive, 
+                               levels = c("Anti", "Neutral", "Pro")),
+         issue_strength = as.factor(issue_strength),
+         issue_motive_strength = factor(issue_motive_strength,
+                                        levels = c("Anti-strong", 
+                                                   "Anti-moderate",
+                                                   "Neutral",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"
+                                                   )),
+         ideo_motive = factor(ideo_motive,
+                              levels = c("Anti", "Neutral", "Pro")),
+         ideo_strength = as.factor(ideo_strength),
+         ideo_motive_strength = factor(ideo_motive_strength,
+                                       levels = c("Anti-strong", 
+                                                  "Anti-moderate",
+                                                  "Anti-weak",
+                                                  "Neutral",
+                                                  "Pro-weak",
+                                                  "Pro-moderate",
+                                                  "Pro-strong"
+                                                   )),
+         ) %>% 
+  select(subj_idx:ideology_num,ideo_group,
+         partisanship:rt_nogo_avg, 
+         Screen:response, response_proportion, rt, 
+         correct_answer,
+         news_source, issue_motive, issue_strength, issue_motive_strength,
+         ideo_motive, ideo_strength, ideo_motive_strength, 
+         questionnaire_attention_check, task_attention_check, 
+         attention_start, attention_end, issue_direction, ideo_direction)
+```
+
+#### Robust data
+
+Create another analysis data frame with the same variables but additional filters that were not pre-registered.
+
+-   attention_start != "Yes"
+
+-   attention_end != "Yes"
+
+-   task_attention_check != "passed"
+
+-   overall_accuracy \< 50
+
+```{r stringent-filters}
+data_robust_analysis <- data_analysis 
+
+# Filter out attention_start != "Yes"
+initial_rows <- nrow(data_robust_analysis)
+data_robust_analysis <- data_robust_analysis %>% 
+  filter(attention_start == "Yes")
+att_start_filter <- initial_rows - nrow(data_robust_analysis)
+
+# Filter out attention_end != "Yes"
+initial_rows <- nrow(data_robust_analysis)
+data_robust_analysis <- data_robust_analysis %>% 
+  filter(attention_end == "Yes")
+att_end_filter <- initial_rows - nrow(data_robust_analysis)
+
+# Filter out task_attention_check != "passed"
+initial_rows <- nrow(data_robust_analysis)
+data_robust_analysis <- data_robust_analysis %>% 
+  filter(task_attention_check == "passed")
+att_task_filter <- initial_rows - nrow(data_robust_analysis)
+
+# Filter out overall_accuracy < 50
+initial_rows <- nrow(data_robust_analysis)
+data_robust_analysis <- data_robust_analysis %>% 
+  filter(overall_accuracy >= 50)
+att_gng_filter <- initial_rows - nrow(data_robust_analysis)
+
+# Create a tibble with the filter information, including duplicate filter
+robust_info <- tibble::tibble(
+  Filter = c(
+    "Rows removed by attention_start != Yes",
+    "Rows removed by attention_end != Yes",
+    "Rows removed by task_attention_check != passed",
+    "Rows removed by overall_accuracy < 50"
+  ),
+  n = c(
+    att_start_filter,
+    att_end_filter,
+    att_task_filter,
+    att_gng_filter
+  )
+)
+
+robust_info %>% 
+  tt()
+```
+
+How many participants made it through all robustness exclusions?
+
+```{r}
+data_robust_analysis %>%
+  summarise(num_participants = n_distinct(subj_idx)) %>% 
+  pull(num_participants)
+```
+
+### Save data
+
+```{r create-dir, include=FALSE}
+dir.create(here("01_data", "analysis"), recursive = TRUE, showWarnings = TRUE)
+```
+
+```{r save-csv-data}
+# full processed data frame with all variables
+write_csv(data_mot, here("01_data", "analysis", "data_full_processed.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# data frame with selected variables
+write_csv(data_analysis, here("01_data", "analysis", "data_analysis.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# data frame for robustness analyses
+write_csv(data_robust_analysis, here("01_data", "analysis",
+                                     "data_robust_analysis.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+```
+
+```{r save-RData}
+save(data_analysis, file = here("01_data", "analysis", "data_analysis.RData"))
+
+save(data_robust_analysis, file = 
+       here("01_data", "analysis", "data_robust_analysis.RData"))
+
+save(data_combined, file = here("01_data", "scored", "data_questionnaire_gng_combined.RData"))
+```

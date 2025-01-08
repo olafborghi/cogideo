@@ -1,0 +1,276 @@
+---
+title: "Go / No-Go Preparations: Cognitive Control and Motivated Reasoning"
+description: "Data cleaning, data checks, and some preparations for further analyses specific for the Go / No-Go task."
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set error messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, output=FALSE}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # System path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "tinytable",    # Lightweight package to create tables
+          "modelsummary", # Data and model summaries with tables and plots
+          "pandoc",       # Required for saving tables as docx
+          "hrbrthemes",   # Additional ggplot themes
+          "extrafont",    # Additional fonts for plots etc
+          "showtext",     # So that fonts also work on mac
+          "patchwork"     # Combine ggplot objects
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed") 
+  # Load local font, make sure path is correct
+  font_add(family = "Roboto Condensed Light", regular =
+             "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+    showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r colors, include=FALSE}
+# devtools needs to be installed: install.packages("devtools")
+devtools::install_github("dill/beyonce")
+library(beyonce)
+
+bp <- beyonce_palette(41, n = 9, type = "continuous")
+```
+
+```{r create-dirs, include=FALSE}
+# set/create needed directories
+fig_dir <- here("03_output", "figures")
+table_dir <- here("03_output", "tables")
+
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+### Data Preparations
+
+```{r load-data, include=FALSE}
+data_path <- here("01_data", "cleaned", "data_gng_cleaned.csv")
+data_raw <- read_csv(data_path)
+```
+
+Add a new subj_idx to data_raw.
+
+```{r add-subj-idx}
+id_order <- unique(data_raw$`Participant Private ID`)
+
+data_raw <- data_raw %>%
+  mutate(subj_idx = match(`Participant Private ID`, id_order))
+
+id_table <- data_raw %>%
+  select(`Participant Private ID`, subj_idx) %>%
+  distinct() 
+
+# save the id table, so that we can use the same matches for the fake news task
+id_dir <- here("01_data", "private_id_to_subj_idx.csv")
+write_csv(id_table, id_dir, 
+          na = "", append = FALSE, col_names = TRUE)
+```
+
+Create numerical versions of the variables `response` and `stimulus`.
+
+A **go** response is 1, and a **no-go** response is 0.
+
+```{r num-vars}
+data_num <- data_raw %>% 
+  select(subj_idx, 
+         `Participant Private ID`:condition) %>% 
+  rename(response_lab = response,
+         stimulus_lab = stimulus) %>% 
+  mutate(response = if_else(response_lab == "nogo", 0, 1),
+         stimulus = if_else(stimulus_lab == "nogo", 0, 1))
+```
+
+Also, the rt for no-go trials and missed go trials should be NA, and not 500 as it is now.
+
+```{r ng-rts}
+data_num <- data_num %>% 
+  mutate(rt = if_else(response == 0, NA_real_, rt))
+```
+
+### Filter data
+
+#### Remove practice trials
+
+```{r}
+initial_rows <- nrow(data_num)
+data_filtered <- data_num %>% 
+  filter(!str_detect(trial_id, "^practice_"))
+removed_practice <- initial_rows - nrow(data_filtered)
+
+print(paste(removed_practice, "practice trials have been removed"))
+```
+
+#### Remove outliers
+
+Responses with reaction times \< 150 ms will be removed, as such fast reaction times are very unlikely to be actual responses and not just guesses.
+
+```{r calc-outliers}
+outlier_num <- data_filtered %>% 
+  filter(rt < 150) %>% 
+  nrow() 
+
+outlier_per <- (outlier_num / nrow(data_filtered)) * 100
+
+print(paste("There are", outlier_num, "trials with a rt < 150 ms, which is", round(outlier_per, 2), "% of the total number of trials =", nrow(data_num)))
+```
+
+```{r remove-outliers}
+data_filtered <- data_filtered %>% 
+  filter(is.na(rt) | rt >= 150)
+```
+
+### Accuracy, Commission Errors, Omission Errors
+
+```{r score-gng}
+gng_performance <- data_filtered %>%
+  group_by(subj_idx) %>%
+  summarise(
+    commission_errors = sum(stimulus == 0 & response == 1, na.rm = TRUE),
+    omission_errors = sum(stimulus == 1 & response == 0, na.rm = TRUE),
+    go_accuracy = sum(stimulus == 1 & response == 1, na.rm = TRUE) / sum(stimulus == 1, na.rm = TRUE) * 100,
+    nogo_accuracy = sum(stimulus == 0 & response == 0, na.rm = TRUE) / sum(stimulus == 0, na.rm = TRUE) * 100,
+    overall_accuracy = sum(stimulus == response, na.rm = TRUE) / n() * 100,
+    rt_go_avg = mean(rt[stimulus == 1 & !is.na(rt)]),
+    rt_nogo_avg = mean(rt[stimulus == 0 & !is.na(rt)]),
+  )
+```
+
+#### Reverse-coded commission errors
+
+Add reverse-coded commission errors (this was not pre-registered, but to make interpretations more intuitive reverse-coding the commission errors will make it directionally aligned with the CRT correct score --\> higher values indicate higher cognitive control)
+
+```{r reverse-score-commission-errors}
+gng_performance <- gng_performance %>% 
+  mutate(commission_errors_r = 56 - commission_errors)
+```
+
+### Descriptive checks
+
+How many and which participants have an accuracy below 50%?
+
+```{r acc-check}
+gng_performance %>% 
+  filter(overall_accuracy <= 50) %>% 
+  tt()
+
+gng_performance %>% 
+  filter(overall_accuracy <= 50) %>% 
+  tt() %>% 
+  save_tt(here("03_output", "tables", "gng_fails.docx"), 
+          overwrite = TRUE)
+```
+
+```{r summary-scores}
+gng_performance %>% 
+  select(commission_errors, commission_errors_r, omission_errors:rt_nogo_avg) %>% 
+  datasummary_skim()
+
+# and save it
+gng_performance %>% 
+  select(commission_errors:rt_nogo_avg) %>% 
+  datasummary_skim(fun_numeric = list(Mean = Mean, 
+                                      SD = SD, Min = Min, 
+                                      Median = Median, 
+                                      Max = Max
+                                      )) %>% 
+  save_tt(here("03_output", "tables", "gng_performance.docx"), overwrite = TRUE)
+```
+
+Plot the rt distribution during Go trials.
+
+```{r go-trials, fig.height=8, fig.width=10}
+data_filtered %>%
+  filter(stimulus == 1 & !is.na(rt)) %>% 
+  slice(1:3500) %>% 
+  ggplot(aes(x = rt)) +
+  geom_density(alpha = 0.6, color = bp[5], fill = bp[6]) + 
+  facet_wrap(~ subj_idx, ncol = 4) +  
+  labs(x = "Reaction Time (ms)", y = element_blank(),
+       title = "Distribution of Reaction Times during Go Trials for Different Participant") +
+  guides(color = "none", alpha = "none", fill = "none") +
+  theme_ipsum_rc(plot_title_size = 14, grid = F) + 
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        strip.text = element_text(size = 10))
+
+ggsave(here("03_output", "figures", "gng_sbj_rt_dist.png"), width = 9, height = 6, dpi = 300)
+```
+
+Plot the overall distribution of commission errors
+
+```{r comm-dis, fig.height=6, fig.width=8}
+gng_performance %>% 
+  ggplot(aes(x = commission_errors_r)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  theme_ipsum_rc()+
+  labs(
+    title = "Distribution of Reverse-scored Commission Errors",
+    x = "Commission Errors",
+    y = "Count"
+  )
+```
+
+### Reorder variables
+
+```{r reod-vars}
+gng_performance <- gng_performance %>% 
+  select(subj_idx, commission_errors, commission_errors_r, omission_errors:rt_nogo_avg)
+```
+
+### Save data frames
+
+```{r create-dir, include=FALSE}
+dir.create(here("01_data","cleaned"), recursive = TRUE, showWarnings = TRUE)
+dir.create(here("01_data","scored"), recursive = TRUE, showWarnings = TRUE)
+```
+
+```{r save-csv-data}
+# sum scores
+write_csv(gng_performance, here("01_data", "scored", "data_gng_scores.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+
+# gng data
+write_csv(data_filtered, here("01_data", "cleaned", "data_gng_filtered.csv"), 
+          na = "", append = FALSE, col_names = TRUE)
+```

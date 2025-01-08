@@ -1,0 +1,1399 @@
+---
+title: "Figures and tables based on ideo motive analyses (secondary)"
+format:
+  html:
+    theme: lux
+    toc: true
+    toc-depth: 3
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set errors messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=T, message=T, include=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # Path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "ordbetareg",   # A brms wrapper to fit ordered beta regressions
+          "marginaleffects", # Compute marginal effects
+          "broom",        # Convert model objects to data frames
+          "broom.mixed",  # Convert brms model objects to data frames
+          "bayestestR",   # Bayesian model interpretation
+          "tidybayes",    # Integration of Bayesian models in tidy workflow
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "scales",       # Scale functions for visualisations
+          "pandoc",       # Required for saving tables as docx
+          "glue",         # Interpreted string literals
+          "svglite",      # Required to save figs as svg
+          "hrbrthemes",   # Additional ggplot themes
+          "extrafont",    # Additional fonts for plots etc
+          "showtext",     # So that fonts also work on mac
+          "ggdist",       # Special geoms for posterior distributions
+          "patchwork"     # Combine ggplot objects
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  # Load local font, make sure path is correct
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed")
+  font_add(family = "Roboto Condensed Light", regular = "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r colors, include=FALSE}
+# devtools needs to be installed: install.packages("devtools")
+devtools::install_github("dill/beyonce")
+library(beyonce)
+
+bp8 <- beyonce_palette(8, n = 9, type = "continuous")
+bp41 <- beyonce_palette(41, n = 9, type = "continuous")
+bp80 <- beyonce_palette(80, n = 30, type = "continuous")
+```
+
+```{r create-dirs, include=FALSE}
+# set/create needed directories
+pol_model_dir <- here("03_output", "models", "pol_ideo")
+nonpol_model_dir <- here("03_output", "models", "nonpol_ideo")
+
+table_dir <- here("03_output", "tables", "combined_ideo")
+fig_dir <- here("03_output", "figures", "combined_ideo")
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+## Preparations
+
+#### Load models
+
+```{r load-models}
+# pol models (across performance and neutral)
+m1.pol <- readRDS(file = here(pol_model_dir, "m1.pol.rds"))
+m2.pol <- readRDS(file = here(pol_model_dir, "m2.pol.rds"))
+m3.pol <- readRDS(file = here(pol_model_dir, "m3.pol.rds"))
+m4.pol <- readRDS(file = here(pol_model_dir, "m4.pol.rds"))
+m5.pol <- readRDS(file = here(pol_model_dir, "m5.pol.rds"))
+m6.pol <- readRDS(file = here(pol_model_dir, "m6.pol.rds"))
+
+# performance models
+m1.per <- readRDS(file = here(nonpol_model_dir, "m1.per.rds"))
+m2.per <- readRDS(file = here(nonpol_model_dir, "m2.per.rds"))
+m3.per <- readRDS(file = here(nonpol_model_dir, "m3.per.rds"))
+m4.per <- readRDS(file = here(nonpol_model_dir, "m4.per.rds"))
+m5.per <- readRDS(file = here(nonpol_model_dir, "m5.per.rds"))
+m6.per <- readRDS(file = here(nonpol_model_dir, "m6.per.rds"))
+
+# neutral models
+m1.neu <- readRDS(file = here(nonpol_model_dir, "m1.neu.rds"))
+m2.neu <- readRDS(file = here(nonpol_model_dir, "m2.neu.rds"))
+m3.neu <- readRDS(file = here(nonpol_model_dir, "m3.neu.rds"))
+m4.neu <- readRDS(file = here(nonpol_model_dir, "m4.neu.rds"))
+m5.neu <- readRDS(file = here(nonpol_model_dir, "m5.neu.rds"))
+m6.neu <- readRDS(file = here(nonpol_model_dir, "m6.neu.rds"))
+```
+
+#### Load original data
+
+```{r load-data}
+data_path <- here("01_data", "analysis", "data_analysis.RData")
+load(file = data_path)
+```
+
+#### Filters
+
+```{r pre-analysis-filter}
+initial_rows <- nrow(data_analysis)
+data_prep <- data_analysis %>% 
+  filter(Screen != "Question")
+filtered_rows <- initial_rows - nrow(data_prep)
+
+filtered_rows
+```
+
+```{r}
+data_full <- data_prep %>% 
+  filter(question_type %in% c("political", "performance", "nonpolitical")) %>% 
+  mutate(question_topic = factor(question_topic, 
+                                 levels = c("climate",
+                                            "gender",
+                                            "immigration",
+                                            "discrimination",
+                                            "adoption",
+                                            "punishment",
+                                            "gonogo_performance", 
+                                            "fakenews_performance",
+                                            "teaculture",
+                                            "brain"))) %>%
+  droplevels()   
+
+unique(data_full$question_topic)
+```
+
+#### Data types
+
+```{r ordered-factor-ideo-motive-strength}
+data_full <- data_full %>%
+  mutate(ideo_motive_strength = factor(ideo_motive_strength,
+                                        levels = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Anti-weak",
+                                                   "Neutral",
+                                                   "Pro-weak",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                        ordered = TRUE)) 
+```
+
+#### Data for submodels
+
+```{r}
+data_pol <- data_full %>% 
+  filter(question_type == "political") %>% 
+  droplevels() 
+
+data_per <- data_full %>% 
+  filter(question_type == "performance") %>% 
+  droplevels()   
+
+data_neu <- data_full %>% 
+  filter(question_type == "nonpolitical") %>% 
+  droplevels()  
+
+unique(data_pol$question_topic)
+unique(data_per$question_topic)
+unique(data_neu$question_topic)
+```
+
+## Table 1: Parameter estimates of interest m1, m3, m4 (logit)
+
+Create a logit table with main parameters of interest of m1, m3, m4.
+
+#### m1 table
+
+```{r}
+h0a.pol <- hypothesis(m1.pol, "ideo_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.per <- hypothesis(m1.per, "ideo_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.neu <- hypothesis(m1.neu, "ideo_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.pol$hypothesis$Evid.Ratio
+h0a.per$hypothesis$Evid.Ratio
+h0a.neu$hypothesis$Evid.Ratio
+
+h0b.pol <- hypothesis(m1.pol, "ideo_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.per <- hypothesis(m1.per, "ideo_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.neu <- hypothesis(m1.neu, "ideo_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.pol$hypothesis$Evid.Ratio
+h0b.per$hypothesis$Evid.Ratio
+h0b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m1.pol.logit <- describe_posterior(m1.pol, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h0a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.pol$hypothesis$Evid.Ratio)
+
+m1.per.logit <- describe_posterior(m1.per, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h0a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.per$hypothesis$Evid.Ratio)
+
+m1.neu.logit <- describe_posterior(m1.neu, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h0a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.neu$hypothesis$Evid.Ratio)
+
+m1.logit <- bind_rows(m1.pol.logit, m1.per.logit, m1.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_ideo_motivePro") %>% 
+  mutate(Parameter = "Motive (Pro > Anti)") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m1.logit
+```
+
+#### m3 table
+
+```{r}
+h1a.pol <- hypothesis(m3.pol, "ideo_motivePro:scalecrt_correct > 0",
+                                alpha = 0.025,
+                                seed = 42)
+
+h1a.per <- hypothesis(m3.per, "ideo_motivePro:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a.neu <- hypothesis(m3.neu, "ideo_motivePro:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a.pol$hypothesis$Evid.Ratio
+h1a.per$hypothesis$Evid.Ratio
+h1a.neu$hypothesis$Evid.Ratio
+
+h1b.pol <- hypothesis(m3.pol, "ideo_motivePro:scalecrt_correct < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.per <- hypothesis(m3.per, "ideo_motivePro:scalecrt_correct < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.neu <- hypothesis(m3.neu, "ideo_motivePro:scalecrt_correct < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.pol$hypothesis$Evid.Ratio
+h1b.per$hypothesis$Evid.Ratio
+h1b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m3.pol.logit <- describe_posterior(m3.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h1a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.pol$hypothesis$Evid.Ratio)
+
+m3.per.logit <- describe_posterior(m3.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h1a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.per$hypothesis$Evid.Ratio)
+
+m3.neu.logit <- describe_posterior(m3.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h1a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.neu$hypothesis$Evid.Ratio)
+
+m3.logit <- bind_rows(m3.pol.logit, m3.per.logit, m3.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_ideo_motivePro:scalecrt_correct") %>% 
+  mutate(Parameter = "Motive x Cognitive Reflection") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m3.logit
+```
+
+#### m4 table
+
+```{r}
+h2a.pol <- hypothesis(m4.pol, "ideo_motivePro:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.per <- hypothesis(m4.per, "ideo_motivePro:scalecommission_errors_r > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.neu <- hypothesis(m4.neu, "ideo_motivePro:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.pol$hypothesis$Evid.Ratio
+h2a.per$hypothesis$Evid.Ratio
+h2a.neu$hypothesis$Evid.Ratio
+
+h2b.pol <- hypothesis(m4.pol, "ideo_motivePro:scalecommission_errors_r < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.per <- hypothesis(m4.per, "ideo_motivePro:scalecommission_errors_r < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.neu <- hypothesis(m4.neu, "ideo_motivePro:scalecommission_errors_r < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.pol$hypothesis$Evid.Ratio
+h2b.per$hypothesis$Evid.Ratio
+h2b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m4.pol.logit <- describe_posterior(m4.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h2a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.pol$hypothesis$Evid.Ratio)
+
+m4.per.logit <- describe_posterior(m4.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h2a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.per$hypothesis$Evid.Ratio)
+
+m4.neu.logit <- describe_posterior(m4.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h2a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.neu$hypothesis$Evid.Ratio)
+
+m4.logit <- bind_rows(m4.pol.logit, m4.per.logit, m4.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_ideo_motivePro:scalecommission_errors_r") %>% 
+  mutate(Parameter = "Motive x Inhibitory Control") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m4.logit
+```
+
+#### Combined table
+
+```{r}
+combined_logit <- bind_rows(m1.logit, m3.logit, m4.logit) %>% 
+  mutate(`Question Type` = factor(`Question Type`, levels = c("Political", "Performance", "Neutral"))) %>% 
+  arrange(`Question Type`, Parameter)
+
+combined_logit_table <- combined_logit %>% 
+  select(-c("Question Type")) %>% 
+  tt() %>% 
+  group_tt(
+    i = list(
+      "Political Vignettes" = 1,
+      "Performance Vignettes" = 4,
+      "Neutral Vignettes" = 7
+    ),
+    j = list(
+      "95% CI" = 3:4,
+      "Evidence Ratio" = 5:6))
+
+combined_logit_table %>% save_tt(here(table_dir, "combined_logit_table.docx"), overwrite = TRUE)
+
+combined_logit_table
+```
+
+## Main Text: Reported Percentage Predictions m1, m3
+
+### m1: Pro vs. Anti in %
+
+Calculate % comparisons
+
+```{r}
+m1.pol.com <- m1.pol %>% 
+  avg_comparisons() %>% 
+  as_tibble() %>% 
+  select(contrast, estimate, conf.low, conf.high) %>%
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(contrast = recode(contrast,
+                           "mean(Pro) - mean(Anti)" = "Pro - Anti"),
+         "Question Type" = "Political") %>%
+  rename("Contrast" = "contrast",
+         "Estimate" = "estimate",
+         "LL" = "conf.low",
+         "UL" = "conf.high")
+```
+
+```{r}
+m1.per.com <- m1.per %>% 
+  avg_comparisons() %>% 
+  as_tibble() %>% 
+  select(contrast, estimate, conf.low, conf.high) %>%
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(contrast = recode(contrast,
+                           "mean(Pro) - mean(Anti)" = "Pro - Anti"),
+         "Question Type" = "Performance") %>%
+  rename("Contrast" = "contrast",
+         "Estimate" = "estimate",
+         "LL" = "conf.low",
+         "UL" = "conf.high")
+```
+
+```{r}
+m1.neu.com <- m1.neu %>% 
+  avg_comparisons() %>% 
+  as_tibble() %>% 
+  select(contrast, estimate, conf.low, conf.high) %>%
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(contrast = recode(contrast,
+                           "mean(Pro) - mean(Anti)" = "Pro - Anti"),
+         "Question Type" = "Neutral") %>%
+  rename("Contrast" = "contrast",
+         "Estimate" = "estimate",
+         "LL" = "conf.low",
+         "UL" = "conf.high")
+```
+
+Combined table
+
+```{r}
+m1.combined_perc <- bind_rows(m1.pol.com, m1.per.com, m1.neu.com) %>% 
+  mutate(`Question Type` = factor(`Question Type`, levels = c("Political", "Performance", "Neutral"))) 
+
+m1.combined_perc_table <- m1.combined_perc %>% 
+  select(-c("Question Type")) %>% 
+  tt() %>% 
+  group_tt(
+    i = list(
+      "Political Vignettes" = 1,
+      "Performance Vignettes" = 2,
+      "Neutral Vignettes" = 3
+    ),
+    j = list(
+      "95% CI" = 3:4))
+
+m1.combined_perc_table %>% save_tt(here(table_dir, "m1_combined_perc_table.docx"), overwrite = TRUE)
+
+m1.combined_perc_table
+```
+
+### m3: Pro vs. Anti for CRT = 3 and CRT = 0 in %
+
+```{r}
+crt.newdata <- 
+  expand_grid(ideo_motive = c("Pro", "Anti"),
+              crt_correct = c(0, 3))
+```
+
+```{r}
+m3.pol.com <- m3.pol %>%
+    epred_draws(newdata = crt.newdata,
+                re_formula = NA) %>% 
+    group_by(crt_correct) %>% 
+    compare_levels(.epred, by = ideo_motive) %>% 
+    compare_levels(.epred, by = crt_correct) %>% 
+    median_qi(.width = 0.95)
+```
+
+```{r}
+m3.pol.com %>% tt()
+```
+
+## Figure: Motivated Reasoning on Different Topics
+
+### Extract draws
+
+Average effect of motivated reasoning on political, performance, and neutral topics
+
+```{r}
+m1.pol.draws <- m1.pol %>%
+  avg_comparisons(variables = "ideo_motive") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Political",
+         question_topic = "average")
+
+m1.pol.draws %>% median_hdi(draw)
+```
+
+```{r}
+m1.per.draws <- m1.per %>%
+  avg_comparisons(variables = "ideo_motive") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Performance",
+         question_topic = "average")
+
+m1.per.draws %>% median_hdi(draw)
+```
+
+```{r}
+m1.neu.draws <- m1.neu %>%
+  avg_comparisons(variables = "ideo_motive") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Neutral",
+         question_topic = "average")
+
+m1.neu.draws %>% median_hdi(draw)
+```
+
+Motivated reasoning by topic
+
+```{r}
+m1.pol.topic <- avg_comparisons(m1.pol,
+                                variables = "ideo_motive",
+                                by = "question_topic") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Political")
+  
+m1.pol.topic %>% group_by(question_topic) %>% median_hdi(draw)
+```
+
+```{r}
+m1.per.topic <- avg_comparisons(m1.per,
+                                variables = "ideo_motive",
+                                by = "question_topic") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Performance")
+  
+m1.per.topic %>% group_by(question_topic) %>% median_hdi(draw)
+```
+
+```{r}
+m1.neu.topic <- avg_comparisons(m1.neu,
+                                variables = "ideo_motive",
+                                by = "question_topic") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") %>% 
+  mutate(question_type = "Neutral")
+  
+m1.neu.topic %>% group_by(question_topic) %>% median_hdi(draw)
+```
+
+Create a combined dataframe
+
+```{r}
+m1.combined <- bind_rows(m1.pol.draws, m1.pol.topic, 
+                         m1.per.draws, m1.per.topic,
+                         m1.neu.draws, m1.neu.topic)
+```
+
+```{r}
+m1.combined <- m1.combined %>% 
+  mutate(question_topic = factor(question_topic,
+                                 levels = c("brain",
+                                            "teaculture", 
+                                            "fakenews_performance", 
+                                            "gonogo_performance",
+                                            "punishment",
+                                            "adoption", 
+                                            "discrimination",
+                                            "gender",
+                                            "immigration",
+                                            "climate", 
+                                            "average"),
+                                 labels = c("Brain proportion",
+                                            "Tea with milk",
+                                            "Fake News performance",
+                                            "Go / No-Go performance",
+                                            "Criminal reconviction",
+                                            "Same-sex adoption",
+                                            "Racial discrimination",
+                                            "Gender stereotypes",
+                                            "Immigrant population",
+                                            "Anthropogenic climate change",
+                                            "Average"
+                                            )),
+         draw_perc = draw*100) 
+```
+
+### Create figure
+
+```{r fig.width=12, fig.height=10, fig.dpi=300}
+average_color <- "#645CAA"
+
+plot_political <- m1.combined %>%
+  filter(question_type == "Political") %>%
+  ggplot(aes(x = draw_perc, y = question_topic, 
+             fill = question_topic == "Average")) +
+  stat_halfeye(slab_alpha = 0.9, .width = c(0.5, 0.95), 
+               point_interval = "median_qi") +
+  geom_vline(xintercept = 0, alpha = 0.8, linewidth = 0.8, 
+             color = "black", linetype = "dashed") +
+  scale_fill_manual(values = c(`TRUE` = average_color, `FALSE` = "#A685E2")) +
+  labs(subtitle = "Political Vignettes",
+       x = NULL, y = NULL) +
+  scale_x_continuous(labels = label_percent(scale = 1), limits = c(-10, 25),
+                     breaks = seq(-10, 20, by = 5)) +
+  theme_ipsum_rc(base_size = 16,
+                 subtitle_size = 18,
+                 subtitle_face = "bold",
+                 axis_text_size = 16,
+                 grid = "XY") +
+  guides(fill = "none") +
+  theme(legend.position = "none")
+
+plot_performance <- m1.combined %>%
+  filter(question_type == "Performance") %>%
+  ggplot(aes(x = draw_perc, y = question_topic, 
+             fill = question_topic == "Average")) +
+  stat_halfeye(slab_alpha = 0.9, .width = c(0.5, 0.95), 
+               point_interval = "median_qi") +
+  geom_vline(xintercept = 0, alpha = 0.8, linewidth = 0.8, 
+             color = "black", linetype = "dashed") +
+  scale_fill_manual(values = c(`TRUE` = average_color, `FALSE` = "#FF8DC7")) +
+  labs(subtitle = "Performance Vignettes",
+       x = NULL, y = NULL) +
+  scale_x_continuous(labels = label_percent(scale = 1), limits = c(-10, 25)) +
+  theme_ipsum_rc(base_size = 16,
+                 subtitle_size = 18,
+                 subtitle_face = "bold",
+                 axis_text_size = 16,
+                 grid = "XY") +
+  guides(fill = "none") +
+  theme(legend.position = "none")
+
+plot_neutral <- m1.combined %>%
+  filter(question_type == "Neutral") %>%
+  ggplot(aes(x = draw_perc, y = question_topic, 
+             fill = question_topic == "Average")) +
+  stat_halfeye(slab_alpha = 0.9, .width = c(0.5, 0.95), 
+               point_interval = "median_qi") +
+  geom_vline(xintercept = 0, alpha = 0.8, linewidth = 0.8, 
+             color = "black", linetype = "dashed") +
+  scale_fill_manual(values = c(`TRUE` = average_color, `FALSE` = "#FFABE1")) +
+  labs(subtitle = "Neutral Vignettes",
+       x = NULL, y = NULL) +
+  scale_x_continuous(labels = label_percent(scale = 1), limits = c(-10, 25)) +
+  theme_ipsum_rc(base_size = 16,
+                 subtitle_size = 18,
+                 subtitle_face = "bold",
+                 axis_text_size = 16,
+                 grid = "XY") +
+  guides(fill = "none") +
+  theme(legend.position = "none")
+
+main_effect_plot <- plot_political / (plot_performance | plot_neutral) +
+  plot_layout(heights = c(2, 1))
+
+main_effect_plot
+
+ggsave(here(fig_dir, "m1_main_fig.png"), width = 12, height = 10, dpi = 300)
+```
+
+## Figure: The link to cognitive control variables
+
+### Extract political draws
+
+```{r}
+m3.pol.draws <- avg_comparisons(m3.pol,
+                   variables = "ideo_motive",
+                   by = "crt_correct") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m3.pol.draws %>% group_by(crt_correct) %>% median_hdi(draw)
+```
+
+```{r}
+m4.pol.draws <- avg_comparisons(m4.pol,
+                   variables = "ideo_motive",
+                   by = "commission_errors_r",
+                   newdata = expand_grid(ideo_motive = c("Pro", "Anti"),
+                                         commission_errors_r = seq(13, 56)),
+                   re_formula = NA) %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m4.pol.draws %>% group_by(commission_errors_r) %>% median_hdi(draw)
+```
+
+### Create political figures
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+pol_crt_plot <- m3.pol.draws %>%
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = crt_correct, y = draw_perc, fill = factor(crt_correct))) +
+  stat_slabinterval(aes(ymin = conf.low * 100, ymax = conf.high * 100),  
+    .width = c(0.5, 0.95), 
+    alpha = 0.7,
+    position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = c("#E1AFD1", "#AD88C6", "#7469B6", "#6A2C70")) +
+  labs(title = "Cognitive Reflection and Motivated Reasoning",
+    subtitle = glue("Political vignettes (Evid.Ratio H1a > H1b = {round(h1a.pol$hypothesis$Evid.Ratio, 2)})"),
+    x = "Cognitive Reflection",
+    y = "Motivated Reasoning") +
+  scale_x_continuous(breaks = c(0, 1, 2, 3)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 plot_title_face = "bold",
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY") +
+  theme(legend.position = "none")
+
+pol_crt_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+alt_pol_crt_plot <- m3.pol.draws %>% 
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = crt_correct, y = draw_perc)) +
+  stat_lineribbon(.width = c(0.5, 0.95), alpha = 0.6) + 
+  scale_fill_manual(values = c("#AD88C6", "#7469B6")) +
+  labs(title = "Cognitive Reflection and Motivated Reasoning",
+    subtitle = glue("Political vignettes (Evid.Ratio H2a > H2b = {round(h1a.pol$hypothesis$Evid.Ratio, 2)})"),
+       x = "Cognitive Reflection", 
+       y = "Motivated Reasoning",
+       fill = "Credible interval") +
+  scale_x_continuous(breaks = c(0, 1, 2, 3)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 plot_title_face = "bold",
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY"
+                 ) +
+  theme(legend.position = "top")
+
+alt_pol_crt_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+pol_gng_plot <- m4.pol.draws %>% 
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = commission_errors_r, y = draw_perc)) +
+  stat_lineribbon(.width = c(0.5, 0.95), alpha = 0.6) + 
+  scale_fill_manual(values = c("#AD88C6", "#7469B6")) +
+  labs(title = "Inhibitory Control and Motivated Reasoning",
+    subtitle = glue("Political vignettes (Evid.Ratio H2a > H2b = {round(h2a.pol$hypothesis$Evid.Ratio, 2)})"),
+       x = "Inhibitory Control", 
+       y = "Motivated Reasoning",
+       fill = "Credible interval") +
+  scale_x_continuous(breaks = seq(15, 55, by = 10)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 plot_title_face = "bold",
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY"
+                 ) +
+  theme(legend.position = "top")
+
+pol_gng_plot
+```
+
+### Extract performance and neutral draws
+
+```{r}
+m3.per.draws <- avg_comparisons(m3.per,
+                   variables = "ideo_motive",
+                   by = "crt_correct") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m3.per.draws %>% group_by(crt_correct) %>% median_hdi(draw)
+```
+
+```{r}
+m3.neu.draws <- avg_comparisons(m3.neu,
+                   variables = "ideo_motive",
+                   by = "crt_correct") %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m3.neu.draws %>% group_by(crt_correct) %>% median_hdi(draw)
+```
+
+```{r}
+m4.per.draws <- avg_comparisons(m4.per,
+                   variables = "ideo_motive",
+                   by = "commission_errors_r",
+                   newdata = expand_grid(ideo_motive = c("Pro", "Anti"),
+                                         commission_errors_r = seq(13, 56),
+                                         question_topic = levels(data_per$question_topic)),
+                   re_formula = NA) %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m4.per.draws %>% group_by(commission_errors_r) %>% median_hdi(draw)
+```
+
+```{r}
+m4.neu.draws <- avg_comparisons(m4.neu,
+                   variables = "ideo_motive",
+                   by = "commission_errors_r",
+                   newdata = expand_grid(ideo_motive = c("Pro", "Anti"),
+                                         commission_errors_r = seq(13, 56),
+                                         question_topic = levels(data_neu$question_topic)),
+                   re_formula = NA) %>% 
+  posterior_draws() %>% 
+  filter(contrast == "mean(Pro) - mean(Anti)") 
+
+m4.neu.draws %>% group_by(commission_errors_r) %>% median_hdi(draw)
+```
+
+### Create performance and neutral figures
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+per_crt_plot <- m3.per.draws %>%
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = crt_correct, y = draw_perc, fill = factor(crt_correct))) +
+  stat_slabinterval(aes(ymin = conf.low * 100, ymax = conf.high * 100),  
+    .width = c(0.5, 0.95), 
+    alpha = 0.7,
+    position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = c("#E1AFD1", "#AD88C6", "#7469B6", "#6A2C70")) +
+  labs(subtitle = glue("Performance vignettes 
+(Evid.Ratio H1a > H1b = {round(h1a.per$hypothesis$Evid.Ratio, 2)})"),
+       x = NULL, 
+       y = NULL) +
+  scale_x_continuous(breaks = c(0, 1, 2, 3)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY") +
+  theme(legend.position = "none")
+
+per_crt_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+alt_per_crt_plot <- m3.per.draws %>% 
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = crt_correct, y = draw_perc)) +
+  stat_lineribbon(.width = c(0.5, 0.95), alpha = 0.6) + 
+  scale_fill_manual(values = c("#AD88C6", "#7469B6")) +
+  labs(subtitle = glue("Performance vignettes 
+(Evid.Ratio H1a > H1b = {round(h1a.per$hypothesis$Evid.Ratio, 2)})"),
+       x = NULL, 
+       y = NULL) +
+  scale_x_continuous(breaks = c(0, 1, 2, 3)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY") +
+  theme(legend.position = "none")
+
+alt_per_crt_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+neu_crt_plot <- m3.neu.draws %>%
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = crt_correct, y = draw_perc, fill = factor(crt_correct))) +
+  stat_slabinterval(aes(ymin = conf.low * 100, ymax = conf.high * 100),  
+    .width = c(0.5, 0.95), 
+    alpha = 0.7,
+    position = position_dodge(width = 0.5)) +
+  scale_fill_manual(values = c("#E1AFD1", "#AD88C6", "#7469B6", "#6A2C70")) +
+  labs(subtitle = glue("Neutral vignettes 
+(Evid.Ratio H1a > H1b = {round(h1a.neu$hypothesis$Evid.Ratio, 2)})"),
+       x = NULL, 
+       y = NULL) +
+  scale_x_continuous(breaks = c(0, 1, 2, 3)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY") +
+  theme(legend.position = "none")
+
+neu_crt_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+per_gng_plot <- m4.per.draws %>% 
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = commission_errors_r, y = draw_perc)) +
+  stat_lineribbon(.width = c(0.5, 0.95), alpha = 0.6) + 
+  scale_fill_manual(values = c("#AD88C6", "#7469B6")) +
+  labs(subtitle = glue("Performance vignettes 
+(Evid.Ratio H2a > H2b = {round(h2a.per$hypothesis$Evid.Ratio, 2)})"),
+       x = NULL, 
+       y = NULL) +
+  scale_x_continuous(breaks = seq(15, 55, by = 10)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY"
+                 ) +
+  theme(legend.position = "none")
+
+per_gng_plot
+```
+
+```{r fig.width=6, fig.height=5, fig.dpi=300}
+neu_gng_plot <- m4.neu.draws %>% 
+  mutate(draw_perc = draw * 100) %>% 
+  ggplot(aes(x = commission_errors_r, y = draw_perc)) +
+  stat_lineribbon(.width = c(0.5, 0.95), alpha = 0.6) + 
+  scale_fill_manual(values = c("#AD88C6", "#7469B6")) +
+  labs(subtitle = glue("Neutral vignettes 
+(Evid.Ratio H2a > H2b = {round(h2a.neu$hypothesis$Evid.Ratio, 2)})"),
+       x = NULL, 
+       y = NULL) +
+  scale_x_continuous(breaks = seq(15, 55, by = 10)) +
+  scale_y_continuous(breaks = c(-5, 0, 5, 10, 15, 20, 25),
+                     labels = percent_format(scale = 1)) +
+  theme_ipsum_rc(base_size = 14,
+                 plot_title_size = 16,
+                 axis_title_size = 14,
+                 axis_text_size = 14,
+                 grid = "XY"
+                 ) +
+  theme(legend.position = "none")
+
+neu_gng_plot
+```
+
+### Combined plot
+
+```{r fig.width=12, fig.height=10, fig.dpi=300}
+top_panel <- pol_crt_plot + pol_gng_plot +
+  plot_layout(ncol = 2, widths = c(1, 1))
+
+bottom_left <- per_crt_plot + neu_crt_plot +
+  plot_layout(heights = c(1, 1), widths = c(0.5, 0.5))
+
+bottom_right <- per_gng_plot + neu_gng_plot +
+  plot_layout(heights = c(1, 1), widths = c(1.5, 1.5))
+
+cognitive_plot <- (top_panel / (bottom_left | bottom_right)) +
+  plot_layout(heights = c(1.5, 2)) 
+
+cognitive_plot
+
+ggsave(here(fig_dir, "cognitive_fig.png"), width = 12, height = 10, dpi = 300)
+```
+
+## Supplementary Table 3
+
+Create a logit table with main parameters of interest of m2, m5, m6.
+
+#### m2 table
+
+```{r}
+h0a_mo.pol <- as_tibble(m2.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+
+h0a_mo.per <- as_tibble(m2.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a_mo.neu <- as_tibble(m2.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a_mo.pol$hypothesis$Evid.Ratio
+h0a_mo.per$hypothesis$Evid.Ratio
+h0a_mo.neu$hypothesis$Evid.Ratio
+
+h0b_mo.pol <- as_tibble(m2.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength < 0",
+             alpha = 0.025,
+             seed = 42)
+
+
+h0b_mo.per <- as_tibble(m2.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength < 0",
+             alpha = 0.025,
+             seed = 42)
+
+h0b_mo.neu <- as_tibble(m2.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength < 0",
+             alpha = 0.025,
+             seed = 42)
+
+h0b_mo.pol$hypothesis$Evid.Ratio
+h0b_mo.per$hypothesis$Evid.Ratio
+h0b_mo.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m2.pol.logit <- describe_posterior(m2.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h0a_mo.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h0b_mo.pol$hypothesis$Evid.Ratio)
+
+m2.per.logit <- describe_posterior(m2.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h0a_mo.per$hypothesis$Evid.Ratio,
+         "β < 0" = h0b_mo.per$hypothesis$Evid.Ratio)
+
+m2.neu.logit <- describe_posterior(m2.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h0a_mo.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h0b_mo.neu$hypothesis$Evid.Ratio)
+
+m2.logit <- bind_rows(m2.pol.logit, m2.per.logit, m2.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "bsp_moideo_motive_strength") %>% 
+  mutate(Parameter = "Motive strength") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m2.logit
+```
+
+#### m5 table
+
+```{r}
+h1a_mo.pol <- as_tibble(m5.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a_mo.per <- as_tibble(m5.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a_mo.neu <- as_tibble(m5.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a_mo.pol$hypothesis$Evid.Ratio
+h1a_mo.per$hypothesis$Evid.Ratio
+h1a_mo.neu$hypothesis$Evid.Ratio
+
+h1b_mo.pol <- as_tibble(m5.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct < 0",
+             alpha = 0.025,
+             seed = 42)
+
+h1b_mo.per <- as_tibble(m5.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct < 0", 
+             alpha = 0.025,
+             seed = 42)
+
+h1b_mo.neu <- as_tibble(m5.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecrt_correct < 0", 
+             alpha = 0.025,
+             seed = 42)
+
+h1b_mo.pol$hypothesis$Evid.Ratio
+h1b_mo.per$hypothesis$Evid.Ratio
+h1b_mo.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m5.pol.logit <- describe_posterior(m5.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h1a_mo.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h1b_mo.pol$hypothesis$Evid.Ratio)
+
+m5.per.logit <- describe_posterior(m5.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h1a_mo.per$hypothesis$Evid.Ratio,
+         "β < 0" = h1b_mo.per$hypothesis$Evid.Ratio)
+
+m5.neu.logit <- describe_posterior(m5.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h1a_mo.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h1b_mo.neu$hypothesis$Evid.Ratio)
+
+m5.logit <- bind_rows(m5.pol.logit, m5.per.logit, m5.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "bsp_moideo_motive_strength:scalecrt_correct") %>% 
+  mutate(Parameter = "Motive strength x Cognitive Reflection") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m5.logit
+```
+
+#### m6 table
+
+```{r}
+h2a_mo.pol <- as_tibble(m6.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a_mo.per <- as_tibble(m6.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a_mo.neu <- as_tibble(m6.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a_mo.pol$hypothesis$Evid.Ratio
+h2a_mo.per$hypothesis$Evid.Ratio
+h2a_mo.neu$hypothesis$Evid.Ratio
+
+h2b_mo.pol <- as_tibble(m6.pol) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r < 0",
+             alpha = 0.025,
+             seed = 42)
+
+h2b_mo.per <- as_tibble(m6.per) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r < 0", 
+             alpha = 0.025,
+             seed = 42)
+
+h2b_mo.neu <- as_tibble(m6.neu) %>% 
+  hypothesis(., "bsp_moideo_motive_strength:scalecommission_errors_r < 0",
+             alpha = 0.025,
+             seed = 42)
+
+h2b_mo.pol$hypothesis$Evid.Ratio
+h2b_mo.per$hypothesis$Evid.Ratio
+h2b_mo.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m6.pol.logit <- describe_posterior(m6.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h2a_mo.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h2b_mo.pol$hypothesis$Evid.Ratio)
+
+m6.per.logit <- describe_posterior(m6.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h2a_mo.per$hypothesis$Evid.Ratio,
+         "β < 0" = h2b_mo.per$hypothesis$Evid.Ratio)
+
+m6.neu.logit <- describe_posterior(m6.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h2a_mo.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h2a_mo.neu$hypothesis$Evid.Ratio)
+
+m6.logit <- bind_rows(m6.pol.logit, m6.per.logit, m6.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "bsp_moideo_motive_strength:scalecommission_errors_r") %>% 
+  mutate(Parameter = "Motive strength x Inhibitory Control") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m6.logit
+```
+
+#### Combined table
+
+```{r}
+combined_mo_logit <- bind_rows(m2.logit, m5.logit, m6.logit) %>% 
+  mutate(`Question Type` = factor(`Question Type`, levels = c("Political", "Performance", "Neutral"))) %>% 
+  arrange(`Question Type`, Parameter)
+
+combined_mo_logit_table <- combined_mo_logit %>% 
+  select(-c("Question Type")) %>% 
+  tt() %>% 
+  group_tt(
+    i = list(
+      "Political Vignettes" = 1,
+      "Performance Vignettes" = 4,
+      "Neutral Vignettes" = 7
+    ),
+    j = list(
+      "95% CI" = 3:4,
+      "Evidence Ratio" = 5:6))
+
+combined_mo_logit_table %>% save_tt(here(table_dir, "combined_mo_logit_table.docx"), overwrite = TRUE)
+
+combined_mo_logit_table
+```
+
+## Supplementary Figure 2
+
+### Extract draws
+
+```{r}
+m2.pol.draws <- m2.pol %>% 
+  epred_draws(newdata = expand_grid(ideo_motive_strength = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Anti-weak",
+                                                   "Pro-weak",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                    question_topic = levels(data_pol$question_topic)),
+              re_formula = ~(ideo_motive|question_topic)) 
+
+m2.per.draws <- m2.per %>% 
+  epred_draws(newdata = expand_grid(ideo_motive_strength = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Anti-weak",
+                                                   "Pro-weak",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                               question_topic = levels(data_per$question_topic)),
+              re_formula = NA) 
+
+
+m2.neu.draws <- m2.neu %>% 
+  epred_draws(newdata = expand_grid(ideo_motive_strength = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Anti-weak",
+                                                   "Pro-weak",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                               question_topic = levels(data_neu$question_topic)),
+              re_formula = NA) 
+```
+
+```{r}
+m2.draws <- bind_rows(m2.pol.draws, m2.per.draws, m2.neu.draws) %>% 
+  mutate(ideo_motive_strength = factor(ideo_motive_strength,
+                                        levels = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Anti-weak",
+                                                   "Pro-weak",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                        ordered = TRUE),
+         question_topic = factor(question_topic, 
+                        levels = c("climate",
+                                   "immigration",
+                                   "gender",
+                                   "discrimination",
+                                   "adoption",
+                                   "punishment",
+                                   "gonogo_performance",
+                                   "fakenews_performance",
+                                   "teaculture",
+                                   "brain"),
+                        labels = c("Anthropogenic climate change",
+                                   "Immigrant population",
+                                   "Gender stereotypes",
+                                   "Racial discrimination",
+                                   "Same-sex adoption",
+                                   "Criminal reconviction",
+                                   "Go / No-Go performance",
+                                   "Fake News performance",
+                                   "Tea with milk",
+                                   "Brain proportion")))
+
+```
+
+### Create figure
+
+```{r fig.width=8, fig.height=12, fig.dpi=300}
+m2.draws %>% 
+  mutate(perc = .epred * 100) %>% 
+  ggplot(aes(x = perc, y = ideo_motive_strength, fill = ideo_motive_strength)) +
+  stat_halfeye(slab_alpha = 0.9, .width = c(0.5, 0.95), 
+               point_interval = "median_qi") +
+  geom_vline(xintercept = 50, alpha = 0.8, linewidth = 0.8, 
+             color = "black", linetype = "dashed") +
+  guides(fill = "none") +
+  scale_fill_manual(values = rev(beyonce_palette(41, n = 6, 
+                                             type = "continuous"))) +
+  labs(title="Message Ratings by Motive Strength",
+       x = "Coefficients", y = NULL,
+       caption = "50% and 95% credible intervals shown in black") +
+  scale_x_continuous(labels = label_percent(scale = 1), limits = c(15, 85),
+                     breaks = seq(20, 80, by = 10)) +
+  theme_ipsum_rc(base_size = 12,
+                 plot_title_size = 14,
+                 axis_title_size = 12,
+                 axis_title_face = "bold",
+                 axis_text_size = 12,
+                 strip_text_size = 12,
+                 strip_text_face = "bold"
+                 ) + 
+  facet_wrap(~question_topic, ncol = 2)
+
+ggsave(here(fig_dir, "m2_perc_fig.png"), width = 8, height = 12, dpi = 300)
+```

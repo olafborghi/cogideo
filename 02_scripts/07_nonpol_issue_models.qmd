@@ -1,0 +1,888 @@
+---
+title: "Analysis of Motivated Reasoning on Nonpolitical Topics Using Issue Motives"
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set errors messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=T, message=T, include=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # Path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "ordbetareg"    # A brms wrapnonpol to fit ordered beta regressions
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r Stan backend, include=FALSE}
+# I use the faster cmdstanr backend for Stan in the place of rstan
+# to do so install the cmdstanr package first: https://mc-stan.org/cmdstanr/
+# Then run cmdstanr::install_cmdstan() to install cmdstan on your computer.
+# RTools must be installed as well. For more info see 
+# https://mc-stan.org/cmdstanr/articles/cmdstanr.html#introduction
+
+# install.packages("cmdstanr", repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
+# cmdstanr::install_cmdstan()
+
+options(mc.cores = 4,  
+        brms.backend = "cmdstanr")
+bayes_seed <- 42
+```
+
+```{r create-dirs, include=FALSE}
+# set/create needed directories
+model_dir <- here("03_output", "models", "nonpol_issue")
+dia_dir <- here("03_output", "diagnostics", "nonpol_issue")
+
+dir.create(model_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(dia_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+## Data Preparations
+
+#### Load data
+
+```{r load-data, include=FALSE}
+data_path <- here("01_data", "analysis", "data_analysis.RData")
+load(file = data_path)
+```
+
+#### Filters
+
+**Important: Filter out the responses to the Question (Screen != Question) as we only model the truth ratings for now!**
+
+```{r pre-analysis-filter}
+initial_rows <- nrow(data_analysis)
+data_prep <- data_analysis %>% 
+  filter(Screen == "Message")
+filtered_rows <- initial_rows - nrow(data_prep)
+
+filtered_rows
+```
+
+I also only want the nonpolitical question topics - one dataset across the two question types, and one for each question type.
+
+```{r}
+data_nonpol <- data_prep %>% 
+  filter(question_type %in% c("performance", "nonpolitical")) %>% 
+  mutate(question_topic = factor(question_topic, 
+                                 levels = c("gonogo_performance", 
+                                            "fakenews_performance",
+                                            "teaculture",
+                                            "brain"))) %>%
+  droplevels()   
+
+unique(data_nonpol$question_topic)
+```
+
+#### Data types
+
+As we will model monotonic effects, we have to transform the issue_motive_strength variable into an ordered factor.
+
+```{r ordered-factor-issue-motive-strength}
+data_nonpol <- data_nonpol %>%
+  mutate(issue_motive_strength = factor(issue_motive_strength,
+                                        levels = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Neutral",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                        ordered = TRUE)) 
+```
+
+#### Data for sub-models
+
+```{r}
+data_per <- data_nonpol %>% 
+  filter(question_type == "performance") %>% 
+  droplevels()   
+
+data_neu <- data_nonpol %>% 
+  filter(question_type == "nonpolitical") %>% 
+  droplevels()  
+
+unique(data_per$question_topic)
+unique(data_neu$question_topic)
+```
+
+## Fit m1
+
+### m1.per
+
+m1.per: response_proportion \~ issue_motive \* question_topic + (issue_motive \| subj_idx)
+
+Check some settings:
+
+```{r contrasts-m1.per}
+contrasts(data_per$question_topic) <- c(-0.5, 0.5)
+
+print(contrasts(data_per$question_topic))
+```
+
+Set model formula
+
+```{r formula-m1.per}
+f_m1.per <- bf(response_proportion ~ issue_motive * question_topic +
+                 (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m1.per, results='hide'}
+m1.per <- ordbetareg(formula = f_m1.per,
+                     data = data_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),        
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m1.per"))
+```
+
+#### Model checks
+
+```{r print-m1.per}
+print(m1.per)
+```
+
+##### Posterior predictive check
+
+```{r m1.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m1.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m1.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots.
+
+```{r m1.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m1.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m1.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m1.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m1.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m1.per.png"), width = 18, height = 14)
+```
+
+### m1.neu
+
+m1.neu: response_proportion \~ issue_motive \* question_topic + (issue_motive \| subj_idx)
+
+Check some settings:
+
+```{r contrasts-m1.neu}
+contrasts(data_neu$question_topic) <- c(-0.5, 0.5)
+
+print(contrasts(data_neu$question_topic))
+```
+
+Set model formula
+
+```{r formula-m1.neu}
+f_m1.neu <- bf(response_proportion ~ issue_motive * question_topic +
+                 (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m1.neu, results='hide'}
+m1.neu <- ordbetareg(formula = f_m1.neu,
+                     data = data_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),        
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m1.neu"))
+```
+
+#### Model checks
+
+```{r print-m1.neu}
+print(m1.neu)
+```
+
+##### Posterior predictive check
+
+```{r m1.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m1.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m1.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots.
+
+```{r m1.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m1.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m1.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m1.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m1.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m1.neu.png"), width = 18, height = 14)
+```
+
+## Fit m2
+
+### m2.per
+
+m2.per: response_proportion \~ issue_motive_strength \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m2.per}
+f_m2.per <- bf(response_proportion ~ 
+                    mo(issue_motive_strength) * question_topic +
+                    (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m2.per, results='hide'}
+m2.per <- ordbetareg(formula = f_m2.per,
+                        data = data_per, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.99, 
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m2.per"))
+```
+
+#### Model checks
+
+```{r print-m2.per}
+print(m2.per)
+```
+
+##### Posterior predictive check
+
+```{r m2.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m2.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m2.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m2.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m2.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m2.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m2.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m2.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m2.per.png"), width = 18, height = 14)
+```
+
+### m2.neu
+
+m2.neu: response_proportion \~ issue_motive_strength \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m2.neu}
+f_m2.neu <- bf(response_proportion ~ 
+                    mo(issue_motive_strength) * question_topic +
+                    (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m2.neu, results='hide'}
+m2.neu <- ordbetareg(formula = f_m2.neu,
+                        data = data_neu, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.99, 
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m2.neu"))
+```
+
+#### Model checks
+
+```{r print-m2.neu}
+print(m2.neu)
+```
+
+##### Posterior predictive check
+
+```{r m2.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m2.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m2.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m2.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m2.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m2.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m2.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m2.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m2.neu.png"), width = 18, height = 14)
+```
+
+## Fit m3
+
+### m3.per
+
+m3.per: response_proportion \~ issue_motive \* crt \* question_topic + (issue_motive \| subj_idx)
+
+Set model formula
+
+```{r formula-m3.per}
+f_m3.per <- bf(response_proportion ~ issue_motive * scale(crt_correct) *
+                    question_topic + 
+                    (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m3.per, results='hide'}
+m3.per <- ordbetareg(formula = f_m3.per,
+                        data = data_per, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.8,                     
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m3.per"))
+```
+
+#### Model checks
+
+```{r print-m3.per}
+print(m3.per)
+```
+
+##### Posterior predictive check
+
+```{r m3.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m3.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m3.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m3.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m3.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m3.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m3.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m3.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m3.per.png"), width = 18, height = 14)
+```
+
+### m3.neu
+
+m3.neu: response_proportion \~ issue_motive \* crt \* question_topic + (issue_motive \| subj_idx)
+
+Set model formula
+
+```{r formula-m3.neu}
+f_m3.neu <- bf(response_proportion ~ issue_motive * scale(crt_correct) *
+                    question_topic + 
+                    (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m3.neu, results='hide'}
+m3.neu <- ordbetareg(formula = f_m3.neu,
+                        data = data_neu, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.8,                     
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m3.neu"))
+```
+
+#### Model checks
+
+```{r print-m3.neu}
+print(m3.neu)
+```
+
+##### Posterior predictive check
+
+```{r m3.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m3.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m3.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m3.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m3.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m3.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m3.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m3.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m3.neu.png"), width = 18, height = 14)
+```
+
+## Fit m4
+
+### m4.per
+
+m4.per: response_proportion \~ issue_motive \* commission_errors_r \* question_topic + (issue_motive \| subj_idx)
+
+Set model formula
+
+```{r formula-m4.per}
+f_m4.per <- bf(response_proportion ~ issue_motive * 
+                    scale(commission_errors_r) * question_topic +
+                    (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m4.per, results='hide'}
+m4.per <- ordbetareg(formula = f_m4.per,
+                        data = data_per, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.99,
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m4.per"))
+```
+
+#### Model checks
+
+```{r print-m4.per}
+print(m4.per)
+```
+
+##### Posterior predictive check
+
+```{r m4.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m4.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m4.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m4.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m4.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m4.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m4.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m4.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m4.per.png"), width = 18, height = 14)
+```
+
+### m4.neu
+
+m4.neu: response_proportion \~ issue_motive \* commission_errors_r \* question_topic + (issue_motive \| subj_idx)
+
+Set model formula
+
+```{r formula-m4.neu}
+f_m4.neu <- bf(response_proportion ~ issue_motive * 
+                    scale(commission_errors_r) * question_topic +
+                    (issue_motive | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+
+```{r fit-m4.neu, results='hide'}
+m4.neu <- ordbetareg(formula = f_m4.neu,
+                        data = data_neu, 
+                        coef_prior_mean = 0,
+                        coef_prior_SD = 1.5,
+                        intercept_prior_mean = 0,
+                        intercept_prior_SD = 1.5,
+                        extra_prior = set_prior("lkj(2)", class = "L"),
+                        seed = bayes_seed,
+                        chains=4,
+                        iter=4000, 
+                        true_bounds = c(0, 1),
+                        control = list(adapt_delta = 0.99,
+                                       max_treedepth = 12),
+                        file = here(model_dir, "m4.neu"))
+```
+
+#### Model checks
+
+```{r print-m4.neu}
+print(m4.neu)
+```
+
+##### Posterior predictive check
+
+```{r m4.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m4.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m4.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+
+```{r m4.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m4.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m4.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m4.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m4.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m4.neu.png"), width = 18, height = 14)
+```
+
+## Fit m5
+
+### m5.per
+
+m5.per: response_proportion \~ issue_motive_strength \* crt \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m5.per}
+f_m5.per <- bf(response_proportion ~ mo(issue_motive_strength) * scale(crt_correct) * question_topic + 
+                 (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+  
+```{r fit-m5.per, results='hide'}
+m5.per <- ordbetareg(formula = f_m5.per,
+                     data = data_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m5.per"))
+```
+
+#### Model checks
+
+```{r print-m5.per}
+print(m5.per)
+```
+
+##### Posterior predictive check
+
+```{r m5.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m5.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m5.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+  
+```{r m5.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m5.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m5.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m5.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m5.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m5.per.png"), width = 18, height = 14)
+```
+
+### m5.neu
+
+m5.neu: response_proportion \~ issue_motive_strength \* crt \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m5.neu}
+f_m5.neu <- bf(response_proportion ~ mo(issue_motive_strength) * scale(crt_correct) * question_topic + 
+                 (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+  
+```{r fit-m5.neu, results='hide'}
+m5.neu <- ordbetareg(formula = f_m5.neu,
+                     data = data_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m5.neu"))
+```
+
+#### Model checks
+
+```{r print-m5.neu}
+print(m5.neu)
+```
+
+##### Posterior predictive check
+
+```{r m5.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m5.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m5.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+  
+```{r m5.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m5.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m5.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m5.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m5.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m5.neu.png"), width = 18, height = 14)
+```
+
+## m6
+
+### m6.per
+
+m6.per: response_proportion \~ issue_motive_strength \* commission_errors_r \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m6.per}
+f_m6.per <- bf(response_proportion ~ mo(issue_motive_strength) * scale(commission_errors_r) * question_topic + 
+                 (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+  
+```{r fit-m6.per, results='hide'}
+m6.per <- ordbetareg(formula = f_m6.per,
+                     data = data_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m6.per"))
+```
+
+#### Model checks
+
+```{r print-m6.per}
+print(m6.per)
+```
+
+##### Posterior predictive check
+
+```{r m6.per-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m5.per, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m6.per.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+  
+```{r m6.per-trace, fig.height=14, fig.width=18}
+mcmc_plot(m6.per, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m6.per.png"), 
+       width = 18, height = 14)
+```
+
+```{r m6.per-density, fig.height=14, fig.width=18}
+mcmc_plot(m6.per, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m6.per.png"), width = 18, height = 14)
+```
+
+### m6.neu
+
+m6.neu: response_proportion \~ issue_motive_strength \* commission_errors_r \* question_topic + (issue_motive_strength \| subj_idx)
+
+Set model formula
+
+```{r formula-m6.neu}
+f_m6.neu <- bf(response_proportion ~ mo(issue_motive_strength) * scale(commission_errors_r) * question_topic + 
+                 (mo(issue_motive_strength) | subj_idx), center = T)
+```
+
+And fit the ordered beta regression:
+  
+```{r fit-m6.neu, results='hide'}
+m6.neu <- ordbetareg(formula = f_m6.neu,
+                     data = data_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m6.neu"))
+```
+
+#### Model checks
+
+```{r print-m6.neu}
+print(m6.neu)
+```
+
+##### Posterior predictive check
+
+```{r m6.neu-ppc, message=FALSE, warning=FALSE, fig.height=6, fig.width=12}
+pp_check_ordbeta(m5.neu, ndraws = 50)
+
+ggsave(here(dia_dir, "ppc_m6.neu.png"), 
+       width = 12, height = 6)
+```
+
+##### Model convergence
+
+Check the trace and density plots:
+  
+```{r m6.neu-trace, fig.height=14, fig.width=18}
+mcmc_plot(m6.neu, type = 'trace')
+ggsave(here(dia_dir, "trace_plot_m6.neu.png"), 
+       width = 18, height = 14)
+```
+
+```{r m6.neu-density, fig.height=14, fig.width=18}
+mcmc_plot(m6.neu, type = 'dens')
+ggsave(here(dia_dir, "density_plot_m6.neu.png"), width = 18, height = 14)
+```

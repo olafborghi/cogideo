@@ -1,0 +1,339 @@
+---
+title: "Descriptive Analyses: Cognitive Control and Motivated Reasoning"
+description: "Descriptive Figures and Tables"
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set errors messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=T, message=T, include=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # Path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "pandoc",       # Required for saving tables as docx
+          "svglite",      # Required to save figs as svg
+          "hrbrthemes",   # Additional ggplot themes
+          "extrafont",    # Additional fonts for plots etc
+          "showtext",     # So that fonts also work on mac
+          "ggdist",       # Special geoms for posterior distributions
+          "corrplot",     # Visualise correlations
+          "patchwork"     # Combine ggplot objects
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  # Load local font, make sure path is correct
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed")
+  font_add(family = "Roboto Condensed Light", regular = "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r colors, include=FALSE}
+# devtools needs to be installed: install.packages("devtools")
+devtools::install_github("dill/beyonce")
+library(beyonce)
+
+bp8 <- beyonce_palette(8, n = 9, type = "continuous")
+bp41 <- beyonce_palette(41, n = 9, type = "continuous")
+bp80 <- beyonce_palette(80, n = 30, type = "continuous")
+```
+
+```{r create-dirs, include=FALSE}
+# set/create needed directories
+table_dir <- here("03_output", "tables", "descriptive")
+fig_dir <- here("03_output", "figures", "descriptive")
+
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(fig_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+## Preparations
+
+#### Load different dataframes
+
+```{r load-data}
+data_analysis_path <- here("01_data", "analysis", "data_analysis.RData")
+data_com_path <- here("01_data", "scored", "data_questionnaire_gng_combined.RData")
+
+load(file = data_analysis_path)
+load(file = data_com_path)
+data_raw <- read_csv(here("01_data", "cleaned", "data_fake_news_cleaned.csv"))
+data_quest <- read_csv(here("01_data", "cleaned", "data_questionnaires_cleaned.csv"))
+
+data <- data_analysis
+data_com <- data_combined
+```
+
+#### Create new classification variables 
+
+Create variables that code high/low education, high/low crt, and high/low Go/No-Go
+
+Education low: ISCED 0-4\
+Education high: ISCED 5-8
+
+CRT low: 0, 1 correct answers\
+CRT high: 2, 3 correct answers\
+\
+Go / No Go low: Below median commission errors reversed\
+Go / No Go high: Above median commission errors reversed
+
+```{r}
+global_median_commission_errors <- median(data$commission_errors_r, na.rm = TRUE)
+
+data <- data %>%
+  # Education: assign high/low based on edu_group
+  mutate(edu_bin = case_when(
+    edu_group %in% c("ISCED 0-2", "ISCED 3-4") ~ "Low",
+    edu_group %in% c("ISCED 5-8") ~ "High",
+    TRUE ~ NA_character_
+  )) %>%
+  
+  # CRT: assign high/low based on crt_correct
+  mutate(crt_bin = case_when(
+    crt_correct %in% c(0, 1) ~ "Low",
+    crt_correct %in% c(2, 3) ~ "High",
+    TRUE ~ NA_character_
+  )) %>%
+  
+  # Go/No-Go: assign high/low based on median split
+  mutate(gng_bin = if_else(
+    commission_errors > global_median_commission_errors, "High", "Low"
+  ))
+```
+
+```{r}
+data %>%
+  select(subj_idx, edu_group, edu_bin, crt_correct, crt_bin, gng_bin) %>%
+  distinct(subj_idx, .keep_all = TRUE) %>% 
+  select(-subj_idx) %>%  
+  mutate(across(everything(), as.factor)) %>%
+  datasummary_skim()
+```
+
+Create separate datasets with factual question answers (data_comion) and the truth ratings (data_rating)
+
+```{r}
+data_comion <- data %>% 
+  filter(Screen == "Question")
+
+data_rating <- data %>% 
+  filter(Screen == "Message")
+```
+
+## Participant Descriptives
+
+```{r}
+data_com_descriptives <- data_com %>%
+  select(gender, age_group, worksit, edu_group, ideology) %>%
+  mutate(
+    gender = recode(gender,
+                    "female" = "Female",
+                    "male" = "Male",
+                    "other" = "Other"),
+    age_group = recode(age_group,
+                       "18-24" = "18-24",
+                       "25-31" = "25-31",
+                       "Above 32" = "Above 32",
+                       "Other" = "Other"),
+    worksit = recode(worksit,
+                     "At university" = "At university",
+                     "Employed" = "Employed",
+                     "In school" = "In school",
+                     "Self-employed" = "Self-employed",
+                     "Unemployed" = "Unemployed",
+                     "Working in the household" = "Working in the household",
+                     "__other" = "Other"),
+    edu_group = recode(edu_group,
+                       "ISCED 0-2" = "ISCED 0-2",
+                       "ISCED 3-4" = "ISCED 3-4",
+                       "ISCED 5-8" = "ISCED 5-8",
+                       "Other" = "Other")
+  ) %>%
+  rename(
+    Gender = gender,
+    `Age Group` = age_group,
+    `Work Situation` = worksit,
+    Education = edu_group,
+    Ideology = ideology
+  )
+
+datasummary_skim(data_com_descriptives, type = "categorical")
+
+datasummary_skim(data_com_descriptives, type = "categorical") %>% 
+  save_tt(here(table_dir, "participant_descriptives.docx"), overwrite = TRUE)
+```
+
+## Variable descriptives
+
+```{r}
+data_com %>%
+  select(age_corrected, ideology_num, crt_correct, commission_errors_r
+  ) %>%
+  rename(
+    Age = age_corrected,
+    Ideology = ideology_num,
+    `Cognitive Reflection` = crt_correct,
+    `Inhibitory Control` = commission_errors_r
+  ) %>%
+  datasummary_skim(type = "numeric")
+
+# save it
+data_com %>%
+  select(age_corrected, ideology_num, crt_correct, commission_errors_r
+  ) %>%
+  rename(
+    Age = age_corrected,
+    Ideology = ideology_num,
+    `Cognitive Reflection` = crt_correct,
+    `Inhibitory Control` = commission_errors_r
+  ) %>%
+  datasummary_skim(fun_numeric = list(Mean = Mean, 
+                                      SD = SD, 
+                                      Min = Min, 
+                                      Median = Median, 
+                                      Max = Max
+                                      )) %>% 
+  save_tt(here(table_dir, "variable_descriptives.docx"), overwrite = TRUE)
+```
+
+## Correlations between measured variables (questionnaires and tasks)
+
+```{r}
+data_corr <- data_quest %>% 
+  select(`Participant Private ID`, o_immigration:o_brain, o_discrimination, o_selfenhancement:o_gender) %>% 
+  left_join(data_com, by = "Participant Private ID") %>% 
+  mutate(across(o_immigration:o_gender, ~ recode(.x,
+    "Strongly disagree" = 1,
+    "Disagree"          = 2,
+    "Neutral"           = 3,
+    "Agree"             = 4,
+    "Strongly agree"    = 5
+  ))) %>% 
+  select(age_corrected, ideology_num,  crt_correct, commission_errors_r, o_immigration:o_gender) %>%
+  rename(
+    "Anti-Immigration" = o_immigration,                    # Too many immigrants
+    "Belief in Discrimination" = o_discrimination,         # Racial discrimination is a barrier
+    "Climate Change Belief" = o_climate,                   # Earth is getting warmer due to human activity
+    "Pro-Same-Sex Adoption" = o_adoption,                  # No reasons to prevent same-sex adoption
+    "Pro-Harsh Punishments" = o_punishment,                # Harsher punishments reduce crime
+    "Belief in Male Superiority" = o_gender,               # Men are more talented in math-related fields
+    "Low Self-Evaluation" = o_selfenhancement,             # Abilities not as good as others
+    "Tea with Milk" = o_teaculture,                        # Tea with milk preference
+    "Brain Function Superiority" = o_brain,                # Human brain's superior function
+    Age = age_corrected,
+    Ideology = ideology_num,
+    `Cognitive Reflection` = crt_correct,
+    `Inhibitory Control` = commission_errors_r
+  ) %>% 
+  mutate(across(everything(), as.numeric)) 
+```
+
+```{r corr-plot, fig.width=10, fig.height=10}
+# correlation analysis
+corrs <- cor(data_corr, use = "pairwise.complete.obs")
+corrs_p <- cor.mtest(data_corr, conf.level = 0.95)
+
+# plot it 
+col <- colorRampPalette(c("#4477AA", "#77AADD", "#FFFFFF", "#EE9988", "#BB4444"))
+corrplot(corrs, method="color", col=col(200),  
+         type="upper", order="original", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, # Text label color and rotation,
+         # p.mat = corrs_p$p, sig.level = 0.05, insig = "blank", 
+         diag=FALSE, number.cex=0.85 
+         )
+```
+```{r}
+# save it
+png(filename = here(fig_dir, "correlation_plot.png"), width = 10, height = 10, units = "in", res = 300)
+
+corrplot(corrs, method="color", col=col(200),  
+         type="upper", order="original", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, # Text label color and rotation,
+         #p.mat = corrs_p$p, sig.level = 0.05, insig = "pch", 
+         diag=FALSE, number.cex=0.85 
+         )
+
+dev.off()
+```
+
+## Number of messages
+
+```{r pre-analysis-filter}
+initial_rows <- nrow(data_analysis)
+data_prep <- data_analysis %>% 
+  filter(Screen != "Question")
+filtered_rows <- initial_rows - nrow(data_prep)
+
+filtered_rows
+```
+
+```{r}
+data_full <- data_prep %>% 
+  filter(question_type %in% c("political", "performance", "nonpolitical")) %>% 
+  mutate(question_topic = factor(question_topic, 
+                                 levels = c("climate",
+                                            "gender",
+                                            "immigration",
+                                            "discrimination",
+                                            "adoption",
+                                            "punishment",
+                                            "gonogo_performance", 
+                                            "fakenews_performance",
+                                            "teaculture",
+                                            "brain"))) %>%
+  droplevels()   
+
+unique(data_full$question_topic)
+```
+
+```{r}
+nrow(data_full) # total number of messages
+nrow(data_full %>% filter(issue_motive == "Pro")) # total number of Pro messages
+nrow(data_full %>% filter(issue_motive == "Anti")) # total number of Anti messages
+nrow(data_full %>% filter(issue_motive == "Neutral")) # total number of Neutral messages
+```
+
+```{r}
+datasummary_crosstab(question_type ~ issue_motive, data = data_full)
+```

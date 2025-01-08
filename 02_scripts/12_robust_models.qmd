@@ -1,0 +1,753 @@
+---
+title: "Robust & posthoc models"
+format:
+  html:
+    theme:
+      light: lux
+    toc: true
+    toc-depth: 4
+embed-resources: true
+---
+
+```{r setup, include=FALSE}
+# knit settings
+knitr::opts_chunk$set(fig.align = "center", fig.retina = 3,
+                      fig.width = 6, fig.height = (6 * 0.618),
+                      out.width = "90%", collapse = FALSE)
+options(digits = 3, width = 90)
+
+# set errors messages to English
+Sys.setenv(LANG = "en")
+
+# Make all the random draws reproducible
+set.seed(42)
+
+# Turn of scientific notation
+options(scipen=999)
+```
+
+```{r libraries, warning=T, message=T, include=F}
+# use groundhog to make code maximally reproducible
+if (!require("groundhog", quietly = TRUE)) {
+  install.packages("groundhog")
+}
+library("groundhog")
+
+# use groundhog to install and load packages
+pkgs <- c("here",         # Path management
+          "tidyverse",    # ggplot, dplyr, %>%, and friends
+          "brms",         # Bayesian (generalised) linear mixed models
+          "ordbetareg",   # A brms wrapper to fit ordered beta regressions
+          "lme4",         # Frequentist linear mixed models
+          "lmerTest",     # p-values for the frequentist models
+          "easystats",    # Different tools for model checks etc.
+          "marginaleffects", # Compute marginal effects
+          "broom",        # Convert model objects to data frames
+          "broom.mixed",  # Convert brms model objects to data frames
+          "tidybayes",    # Integration of Bayesian models in tidy workflow
+          "modelsummary", # Data and model summaries with tables and plots
+          "tinytable",    # Lightweight package to create tables
+          "pandoc",       # Required for saving tables as docx
+          "svglite",      # Required to save figs as svg
+          "hrbrthemes",   # Additional ggplot themes
+          "extrafont",    # Additional fonts for plots etc
+          "showtext",     # So that fonts also work on mac
+          "ggdist",       # Special geoms for posterior distributions
+          "patchwork"     # Combine ggplot objects
+          )
+
+groundhog.library(pkgs, "2024-07-01") 
+```
+
+```{r Stan backend, include=FALSE}
+# I use the faster cmdstanr backend for Stan in the place of rstan
+# to do so install the cmdstanr package first: https://mc-stan.org/cmdstanr/
+# Then run cmdstanr::install_cmdstan() to install cmdstan on your computer.
+# RTools must be installed as well. For more info see 
+# https://mc-stan.org/cmdstanr/articles/cmdstanr.html#introduction
+
+# install.packages("cmdstanr", repos = c('https://stan-dev.r-universe.dev', getOption("repos")))
+# cmdstanr::install_cmdstan()
+
+options(mc.cores = 4,  
+        brms.backend = "cmdstanr")
+bayes_seed <- 42
+```
+
+```{r load-fonts, include=FALSE}
+# If Roboto Condensed is installed on Windows and font_import() was run
+# and fonts() shows the language, this should do the magic
+loadfonts()
+
+# If on Mac, run this so that it also works here
+if (Sys.info()["sysname"] == "Darwin") {
+  # Load local font, make sure path is correct
+  font_add_google(name = "Roboto Condensed", family = "Roboto Condensed")
+  font_add(family = "Roboto Condensed Light", regular = "/Library/Fonts/RobotoCondensed-VariableFont_wght.ttf")
+  showtext_auto()
+  showtext_opts(dpi = 300)
+}
+```
+
+```{r create-dirs, include=FALSE}
+# set/create needed directories
+model_dir <- here("03_output", "models", "robust")
+table_dir <- here("03_output", "tables", "robust")
+
+dir.create(model_dir, recursive = TRUE, showWarnings = TRUE)
+dir.create(table_dir, recursive = TRUE, showWarnings = TRUE)
+```
+
+## Data Preparations
+
+#### Load original data
+
+```{r load-data}
+data_path <- here("01_data", "analysis", "data_analysis.RData")
+data_robust_path <- here("01_data", "analysis", "data_robust_analysis.RData")
+load(file = data_path)
+load(file = data_robust_path)
+```
+
+#### Filters
+
+```{r pre-analysis-filter}
+initial_rows <- nrow(data_analysis)
+data_prep <- data_analysis %>% 
+  filter(Screen != "Question")
+filtered_rows <- initial_rows - nrow(data_prep)
+
+filtered_rows
+
+initial_rows <- nrow(data_robust_analysis)
+data_robust_prep <- data_robust_analysis %>% 
+  filter(Screen != "Question")
+filtered_rows <- initial_rows - nrow(data_robust_prep)
+
+filtered_rows
+```
+
+```{r}
+data_full <- data_prep %>% 
+  filter(question_type %in% c("political", "performance", "nonpolitical")) %>% 
+  mutate(question_topic = factor(question_topic, 
+                                 levels = c("climate",
+                                            "gender",
+                                            "immigration",
+                                            "discrimination",
+                                            "adoption",
+                                            "punishment",
+                                            "gonogo_performance", 
+                                            "fakenews_performance",
+                                            "teaculture",
+                                            "brain"))) %>%
+  droplevels()   
+
+unique(data_full$question_topic)
+
+data_robust_full <- data_robust_prep %>% 
+  filter(question_type %in% c("political", "performance", "nonpolitical")) %>% 
+  mutate(question_topic = factor(question_topic, 
+                                 levels = c("climate",
+                                            "gender",
+                                            "immigration",
+                                            "discrimination",
+                                            "adoption",
+                                            "punishment",
+                                            "gonogo_performance", 
+                                            "fakenews_performance",
+                                            "teaculture",
+                                            "brain"))) %>%
+  droplevels()   
+
+unique(data_robust_full$question_topic)
+```
+
+#### Data types
+
+```{r ordered-factor-issue-motive-strength}
+data_full <- data_full %>%
+  mutate(issue_motive_strength = factor(issue_motive_strength,
+                                        levels = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Neutral",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                        ordered = TRUE)) 
+
+data_robust_full <- data_robust_full %>%
+  mutate(issue_motive_strength = factor(issue_motive_strength,
+                                        levels = c("Anti-strong",
+                                                   "Anti-moderate",
+                                                   "Neutral",
+                                                   "Pro-moderate",
+                                                   "Pro-strong"),
+                                        ordered = TRUE)) 
+```
+
+#### Create variables that codes deviation from Bayesian benchmark (50%)
+
+```{r}
+data_full <- data_full %>% 
+  mutate(deviation = response_proportion - 0.5) %>% 
+  mutate(abs_deviation = abs(deviation))
+
+data_robust_full <- data_robust_full %>% 
+  mutate(deviation = response_proportion - 0.5) %>% 
+  mutate(abs_deviation = abs(deviation))
+```
+
+#### Data for submodels
+
+```{r}
+data_pol <- data_full %>% 
+  filter(question_type == "political") %>% 
+  droplevels() 
+
+data_per <- data_full %>% 
+  filter(question_type == "performance") %>% 
+  droplevels()   
+
+data_neu <- data_full %>% 
+  filter(question_type == "nonpolitical") %>% 
+  droplevels()  
+
+unique(data_pol$question_topic)
+unique(data_per$question_topic)
+unique(data_neu$question_topic)
+nrow(data_pol)
+nrow(data_per)
+nrow(data_neu)
+
+data_robust_pol <- data_robust_full %>% 
+  filter(question_type == "political") %>% 
+  droplevels() 
+
+data_robust_per <- data_robust_full %>% 
+  filter(question_type == "performance") %>% 
+  droplevels()   
+
+data_robust_neu <- data_robust_full %>% 
+  filter(question_type == "nonpolitical") %>% 
+  droplevels()  
+
+unique(data_robust_pol$question_topic)
+unique(data_robust_per$question_topic)
+unique(data_robust_neu$question_topic)
+nrow(data_robust_pol)
+nrow(data_robust_per)
+nrow(data_robust_neu)
+```
+
+## Robustness check: Re-run main models on data with additional exclusions
+
+### m1
+
+```{r contrasts-m1.per}
+contrasts(data_robust_per$question_topic) <- c(-0.5, 0.5)
+
+print(contrasts(data_robust_per$question_topic))
+```
+
+```{r contrasts-m1.neu}
+contrasts(data_robust_neu$question_topic) <- c(-0.5, 0.5)
+
+print(contrasts(data_robust_neu$question_topic))
+```
+
+```{r formula-m1}
+f_m1.pol <- bf(response_proportion ~ issue_motive + 
+                 (issue_motive | subj_idx) +
+                 (issue_motive | question_topic),  center = T)
+
+f_m1.per <- bf(response_proportion ~ issue_motive * question_topic +
+                 (issue_motive | subj_idx), center = T)
+
+f_m1.neu <- bf(response_proportion ~ issue_motive * question_topic +
+                 (issue_motive | subj_idx), center = T)
+```
+
+#### m1 politics
+
+```{r results='hide'}
+m1.pol <- ordbetareg(formula = f_m1.pol,
+                     data = data_robust_pol, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m1.pol"))
+```
+
+```{r}
+print(m1.pol)
+```
+
+#### m1 performance
+
+```{r results='hide'}
+m1.per <- ordbetareg(formula = f_m1.per,
+                     data = data_robust_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m1.per"))
+```
+
+```{r}
+print(m1.per)
+```
+
+#### m1 neutral
+
+```{r results='hide'}
+m1.neu <- ordbetareg(formula = f_m1.neu,
+                     data = data_robust_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m1.neu"))
+```
+
+```{r}
+print(m1.neu)
+```
+
+### m3
+
+```{r formula-m3}
+f_m3.pol <- bf(response_proportion ~ issue_motive * scale(crt_correct) + 
+                 (issue_motive | subj_idx) +
+                 (issue_motive | question_topic), center = T)
+
+f_m3.per <- bf(response_proportion ~ issue_motive * question_topic * scale(crt_correct) +
+                 (issue_motive | subj_idx), center = T)
+
+f_m3.neu <- bf(response_proportion ~ issue_motive * question_topic * scale(crt_correct) +
+                 (issue_motive | subj_idx), center = T)
+```
+
+#### m3 politics
+
+```{r results='hide'}
+m3.pol <- ordbetareg(formula = f_m3.pol,
+                     data = data_robust_pol, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,                           
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m3.pol"))
+```
+
+```{r}
+print(m3.pol)
+```
+
+#### m3 performance
+
+```{r results='hide'}
+m3.per <- ordbetareg(formula = f_m3.per,
+                     data = data_robust_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,                           
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m3.per"))
+```
+
+```{r}
+print(m3.per)
+```
+
+#### m3 neutral
+
+```{r results='hide'}
+m3.neu <- ordbetareg(formula = f_m3.neu,
+                     data = data_robust_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,                           
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m3.neu"))
+```
+
+```{r}
+print(m3.neu)
+```
+
+### m4
+
+```{r formula-m4}
+f_m4.pol <- bf(response_proportion ~ issue_motive * scale(commission_errors_r) + 
+                 (issue_motive | subj_idx) +
+                 (issue_motive | question_topic), center = T)
+
+f_m4.per <- bf(response_proportion ~ issue_motive * 
+                    scale(commission_errors_r) * question_topic +
+                    (issue_motive | subj_idx), center = T)
+
+f_m4.neu <- bf(response_proportion ~ issue_motive * 
+                    scale(commission_errors_r) * question_topic +
+                    (issue_motive | subj_idx), center = T)
+```
+
+#### m4 politics
+
+```{r results='hide'}
+m4.pol <- ordbetareg(formula = f_m4.pol,
+                     data = data_robust_pol, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m4.pol"))
+```
+
+```{r}
+print(m4.pol)
+```
+
+#### m4 perfromance
+
+```{r results='hide'}
+m4.per <- ordbetareg(formula = f_m4.per,
+                     data = data_robust_per, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m4.per"))
+```
+
+```{r}
+print(m4.per)
+```
+
+#### m4 neutral
+
+```{r results='hide'}
+m4.neu <- ordbetareg(formula = f_m4.neu,
+                     data = data_robust_neu, 
+                     coef_prior_mean = 0,
+                     coef_prior_SD = 1.5,
+                     intercept_prior_mean = 0,
+                     intercept_prior_SD = 1.5,
+                     extra_prior = set_prior("lkj(2)", class = "L"),
+                     seed = bayes_seed,
+                     chains=4,
+                     iter=4000, 
+                     true_bounds = c(0, 1),
+                     control = list(adapt_delta = 0.99,
+                                    max_treedepth = 12),
+                     file = here(model_dir, "m4.neu"))
+```
+
+```{r}
+print(m4.neu)
+```
+## Robust table
+
+Create a logit table with main parameters of interest of m1, m3, m4.
+
+#### m1 table
+
+```{r}
+h0a.pol <- hypothesis(m1.pol, "issue_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.per <- hypothesis(m1.per, "issue_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.neu <- hypothesis(m1.neu, "issue_motivePro > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0a.pol$hypothesis$Evid.Ratio
+h0a.per$hypothesis$Evid.Ratio
+h0a.neu$hypothesis$Evid.Ratio
+
+h0b.pol <- hypothesis(m1.pol, "issue_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.per <- hypothesis(m1.per, "issue_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.neu <- hypothesis(m1.neu, "issue_motivePro < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h0b.pol$hypothesis$Evid.Ratio
+h0b.per$hypothesis$Evid.Ratio
+h0b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m1.pol.logit <- describe_posterior(m1.pol, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h0a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.pol$hypothesis$Evid.Ratio)
+
+m1.per.logit <- describe_posterior(m1.per, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h0a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.per$hypothesis$Evid.Ratio)
+
+m1.neu.logit <- describe_posterior(m1.neu, centrality = "median",
+                                  ci = 0.95, ci_method = "eti",
+                                  diagnostic = c("Rhat"), effects = c("fixed"),
+                                  dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h0a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h0b.neu$hypothesis$Evid.Ratio)
+
+m1.logit <- bind_rows(m1.pol.logit, m1.per.logit, m1.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_issue_motivePro") %>% 
+  mutate(Parameter = "Motive (Pro > Anti)") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m1.logit
+```
+
+#### m3 table
+
+```{r}
+h1a.pol <- hypothesis(m3.pol, "issue_motivePro:scalecrt_correct > 0",
+                                alpha = 0.025,
+                                seed = 42)
+
+h1a.per <- hypothesis(m3.per, "issue_motivePro:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a.neu <- hypothesis(m3.neu, "issue_motivePro:scalecrt_correct > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1a.pol$hypothesis$Evid.Ratio
+h1a.per$hypothesis$Evid.Ratio
+h1a.neu$hypothesis$Evid.Ratio
+
+h1b.pol <- hypothesis(m3.pol, "issue_motivePro:scalecrt_correct < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.per <- hypothesis(m3.per, "issue_motivePro:scalecrt_correct < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.neu <- hypothesis(m3.neu, "issue_motivePro:scalecrt_correct < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h1b.pol$hypothesis$Evid.Ratio
+h1b.per$hypothesis$Evid.Ratio
+h1b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m3.pol.logit <- describe_posterior(m3.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h1a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.pol$hypothesis$Evid.Ratio)
+
+m3.per.logit <- describe_posterior(m3.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h1a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.per$hypothesis$Evid.Ratio)
+
+m3.neu.logit <- describe_posterior(m3.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h1a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h1b.neu$hypothesis$Evid.Ratio)
+
+m3.logit <- bind_rows(m3.pol.logit, m3.per.logit, m3.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_issue_motivePro:scalecrt_correct") %>% 
+  mutate(Parameter = "Motive x Cognitive Reflection") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m3.logit
+```
+
+#### m4 table
+
+```{r}
+h2a.pol <- hypothesis(m4.pol, "issue_motivePro:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.per <- hypothesis(m4.per, "issue_motivePro:scalecommission_errors_r > 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.neu <- hypothesis(m4.neu, "issue_motivePro:scalecommission_errors_r > 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2a.pol$hypothesis$Evid.Ratio
+h2a.per$hypothesis$Evid.Ratio
+h2a.neu$hypothesis$Evid.Ratio
+
+h2b.pol <- hypothesis(m4.pol, "issue_motivePro:scalecommission_errors_r < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.per <- hypothesis(m4.per, "issue_motivePro:scalecommission_errors_r < 0", 
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.neu <- hypothesis(m4.neu, "issue_motivePro:scalecommission_errors_r < 0",
+                      alpha = 0.025,
+                      seed = 42)
+
+h2b.pol$hypothesis$Evid.Ratio
+h2b.per$hypothesis$Evid.Ratio
+h2b.neu$hypothesis$Evid.Ratio
+```
+
+```{r}
+m4.pol.logit <- describe_posterior(m4.pol, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Political") %>% 
+  mutate("β > 0" = h2a.pol$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.pol$hypothesis$Evid.Ratio)
+
+m4.per.logit <- describe_posterior(m4.per, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Performance") %>% 
+  mutate("β > 0" = h2a.per$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.per$hypothesis$Evid.Ratio)
+
+m4.neu.logit <- describe_posterior(m4.neu, centrality = "median",
+                                   ci = 0.95, ci_method = "eti",
+                                   diagnostic = c("Rhat"), effects = c("fixed"),
+                                   dispersion = FALSE, test = NULL) %>% 
+  mutate("Question Type" = "Neutral") %>% 
+  mutate("β > 0" = h2a.neu$hypothesis$Evid.Ratio,
+         "β < 0" = h2b.neu$hypothesis$Evid.Ratio)
+
+m4.logit <- bind_rows(m4.pol.logit, m4.per.logit, m4.neu.logit) %>% 
+  select("Question Type", Parameter, Median, 
+         CI_low, CI_high, "β > 0", "β < 0") %>% 
+  rename("LL" = CI_low,
+         "UL" = CI_high) %>% 
+  filter(Parameter == "b_issue_motivePro:scalecommission_errors_r") %>% 
+  mutate(Parameter = "Motive x Inhibitory Control") %>% 
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+m4.logit
+```
+
+#### Combined table
+
+```{r}
+combined_logit <- bind_rows(m1.logit, m3.logit, m4.logit) %>% 
+  mutate(`Question Type` = factor(`Question Type`, levels = c("Political", "Performance", "Neutral"))) %>% 
+  arrange(`Question Type`, Parameter)
+
+combined_logit_table <- combined_logit %>% 
+  select(-c("Question Type")) %>% 
+  tt() %>% 
+  group_tt(
+    i = list(
+      "Political Vignettes" = 1,
+      "Performance Vignettes" = 4,
+      "Neutral Vignettes" = 7
+    ),
+    j = list(
+      "95% CI" = 3:4,
+      "Evidence Ratio" = 5:6))
+
+combined_logit_table %>% save_tt(here(table_dir, "combined_logit_table.docx"), overwrite = TRUE)
+
+combined_logit_table
+```
+
