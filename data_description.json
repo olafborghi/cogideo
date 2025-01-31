@@ -219,7 +219,7 @@
         "message": {
             "Description": "Randomised message displayed (e.g., 'greater than', 'less than') in Fake News Game",
             "Levels": {
-                "greater than": "Message telling participants correct answer is greater than their guess,
+                "greater than": "Message telling participants correct answer is greater than their guess",
                 "less than": "Message telling participants correct answer is less than their guess"
             }
         },
