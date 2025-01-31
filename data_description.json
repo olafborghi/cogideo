@@ -1,0 +1,347 @@
+{
+    "title": "Data Description of 01_data/analysis/data_analysis.csv",
+    "description": "This dataset contains the data used for all reported analyses (Cognitive Control & Motivated Reasoning)",
+    "columns": {
+        "subj_idx": {
+            "Description": "Unique subject identifier for each participant",
+            "Units": "integer"
+        },
+        "age_corrected": {
+            "Description": "Age of the participant, corrected based on communication with participants on Prolific in some cases",
+            "Units": "years"
+        },
+        "age_group": {
+            "Description": "Categorical age group of the participant",
+            "Levels": {
+                "18-24": "Participants aged 18 to 24",
+                "25-31": "Participants aged 25 to 31",
+                "Above 32": "Participants aged 32 and above"
+            }
+        },
+        "gender": {
+            "Description": "Gender of the participant",
+            "Levels": {
+                "female": "Female",
+                "male": "Male",
+                "other": "Other"
+            }
+        },
+        "edu_group": {
+            "Description": "Education level of the participant",
+            "Levels": {
+                "ISCED 0-2": "Lower secondary education or less",
+                "ISCED 3-4": "Upper secondary education or post-secondary non-tertiary education",
+                "ISCED 5-8": "Tertiary education (bachelor's, master's, or doctoral degree)",
+                "Other": "Other education level"
+            }
+        },
+        "ideology": {
+            "Description": "Self-reported political ideology",
+            "Levels": {
+                "Extremely left": "Extremely left-wing",
+                "Left": "Left-wing",
+                "Slightly left": "Slightly left-wing",
+                "Moderate": "Centrist",
+                "Slightly right": "Slightly right-wing",
+                "Right": "Right-wing",
+                "Extremely right": "Extremely right-wing"
+            }
+        },
+        "ideology_num": {
+            "Description": "Numerical representation of political ideology",
+            "Units": "integer"
+        },
+        "ideo_group": {
+            "Description": "Categorical grouping of political ideology",
+            "Levels": {
+                "Left": "Left-wing",
+                "Moderate": "Centrist",
+                "Right": "Right-wing"
+            }
+        },
+        "partisanship": {
+            "Description": "Political party affiliation",
+            "Levels": {
+                "__other": "Other party",
+                "Conservative": "Conservative Party",
+                "Green": "Green Party",
+                "Labour": "Labour Party",
+                "Liberal Democrat": "Liberal Democrats",
+                "Plaid Cymru": "Plaid Cymru",
+                "Reform UK": "Reform UK",
+                "SNP": "Scottish National Party"
+            }
+        },
+        "conservative_rating": {
+            "Description": "Rating of the Conservative Party",
+            "Units": "scale from 0 to 100"
+        },
+        "labour_rating": {
+            "Description": "Rating of the Labour Party",
+            "Units": "scale from 0 to 100"
+        },
+        "libdem_rating": {
+            "Description": "Rating of the Liberal Democrats",
+            "Units": "scale from 0 to 100"
+        },
+        "green_rating": {
+            "Description": "Rating of the Green Party",
+            "Units": "scale from 0 to 100"
+        },
+        "reform_rating": {
+            "Description": "Rating of the Reform Party",
+            "Units": "scale from 0 to 100"
+        },
+        "crt_correct": {
+            "Description": "Number of correct answers in the Cognitive Reflection Test (CRT)",
+            "Units": "count"
+        },
+        "dogmatism": {
+            "Description": "Score on dogmatism scale",
+            "Units": "arbitrary scale"
+        },
+        "affective_polarisation": {
+            "Description": "Measure of affective polarization",
+            "Units": "arbitrary scale"
+        },
+        "commission_errors": {
+            "Description": "Number of commission errors in Go / No-Go task",
+            "Units": "count"
+        },
+        "commission_errors_r": {
+            "Description": "Reverse-coded commission errors",
+            "Units": "count"
+        },
+        "omission_errors": {
+            "Description": "Number of omission errors in Go / No-Go task",
+            "Units": "count"
+        },
+        "go_accuracy": {
+            "Description": "Accuracy in 'go' trials of Go / No-Go task",
+            "Units": "percentage"
+        },
+        "nogo_accuracy": {
+            "Description": "Accuracy in 'no-go' trials of Go / No-Go task",
+            "Units": "percentage"
+        },
+        "overall_accuracy": {
+            "Description": "Overall accuracy in Go / No-Go task",
+            "Units": "percentage"
+        },
+        "rt_go_avg": {
+            "Description": "Average reaction time in 'go' trials",
+            "Units": "milliseconds"
+        },
+        "rt_nogo_avg": {
+            "Description": "Average reaction time in 'no-go' trials",
+            "Units": "milliseconds"
+        },
+        "Screen": {
+            "Description": "Type of screen displayed in Fake News Game",
+            "Levels": {
+                "Message": "A message screen",
+                "Question": "A question screen"
+            }
+        },
+        "trial_round": {
+            "Description": "Round number within the Fake News Game",
+            "Levels": {
+                "1": "Round 1",
+                "2": "Round 2",
+                "3": "Round 3",
+                "4": "Round 4",
+                "5": "Round 5",
+                "6": "Round 6",
+                "7": "Round 7",
+                "8": "Round 8",
+                "9": "Round 9",
+                "10": "Round 10",
+                "attention": "Attention round",
+                "practice": "Practice round"
+            }
+        },
+        "trial_id": {
+            "Description": "Unique identifier for each trial of Fake News Game",
+            "Levels": {
+                "attention01": "Attention trial 1",
+                "practice01": "Practice trial 1",
+                "trial01": "Trial 1",
+                "trial02": "Trial 2",
+                "trial03": "Trial 3",
+                "trial04": "Trial 4",
+                "trial05": "Trial 5",
+                "trial06": "Trial 6",
+                "trial07": "Trial 7",
+                "trial08": "Trial 8",
+                "trial09": "Trial 9",
+                "trial10": "Trial 10"
+            }
+        },
+        "trial_type": {
+            "Description": "Type of trial in Fake News Game",
+            "Levels": {
+                "attention": "Attention trial",
+                "performance": "Performance trial",
+                "trial": "Experimental trial"
+            }
+        },
+        "question_type": {
+            "Description": "Type of question asked in Fake News Game",
+            "Levels": {
+                "attention": "Attention check question",
+                "nonpolitical": "Non-political question",
+                "performance": "Performance-related question",
+                "political": "Political question",
+                "practice": "Practice question"
+            }
+        },
+        "question_topic": {
+            "Description": "Topic of the question asked in Fake News Game",
+            "Levels": {
+                "adoption": "Adoption and parenting",
+                "attention01": "Attention check topic",
+                "brain": "Brain-related topic",
+                "cats": "Cats-related topic",
+                "climate": "Climate change",
+                "discrimination": "Discrimination",
+                "fakenews_performance": "Fake news performance",
+                "gender": "Gender and education",
+                "gonogo_performance": "Go/No-Go task performance",
+                "immigration": "Immigration",
+                "punishment": "Criminal punishment",
+                "teaculture": "Tea culture"
+            }
+        },
+        "question": {
+            "Description": "Full text of the question presented to the participant in Fake News Game",
+            "Units": "string"
+        },
+        "message": {
+            "Description": "Randomised message displayed (e.g., 'greater than', 'less than') in Fake News Game",
+            "Levels": {
+                "greater than": "Message telling participants correct answer is greater than their guess,
+                "less than": "Message telling participants correct answer is less than their guess"
+            }
+        },
+        "response": {
+            "Description": "Participant's rating of how likely a given message is true",
+            "Units": "numeric"
+        },
+        "response_proportion": {
+            "Description": "Response transformed to 0-1 scale",
+            "Units": "proportion (0 to 1)"
+        },
+        "rt": {
+            "Description": "Response time for the response",
+            "Units": "milliseconds"
+        },
+        "correct_answer": {
+            "Description": "Correct answer to the question",
+            "Units": "numeric"
+        },
+        "news_source": {
+            "Description": "Indication of news message gave participants True or False news",
+            "Levels": {
+                "Fake": "Fake news source",
+                "True": "True news source"
+            }
+        },
+        "issue_motive": {
+            "Description": "Motive of participants based on issue questionnaire",
+            "Levels": {
+                "Anti": "Anti-issue motive",
+                "Neutral": "Neutral motive",
+                "Pro": "Pro-issue motive"
+            }
+        },
+        "issue_strength": {
+            "Description": "Strength of the issue motive",
+            "Levels": {
+                "1": "Weak",
+                "2": "Strong"
+            }
+        },
+        "issue_motive_strength": {
+            "Description": "Combined issue motive and strength",
+            "Levels": {
+                "Anti-strong": "Strong anti-issue motive",
+                "Anti-moderate": "Moderate anti-issue motive",
+                "Neutral": "Neutral motive",
+                "Pro-moderate": "Moderate pro-issue motive",
+                "Pro-strong": "Strong pro-issue motive"
+            }
+        },
+        "ideo_motive": {
+            "Description": "Motive coded based on overall Left / right ideology",
+            "Levels": {
+                "Anti": "Anti-ideology motive",
+                "Neutral": "Neutral motive",
+                "Pro": "Pro-ideology motive"
+            }
+        },
+        "ideo_strength": {
+            "Description": "Strength of the ideology motive",
+            "Levels": {
+                "1": "Weak",
+                "2": "Moderate",
+                "3": "Strong"
+            }
+        },
+        "ideo_motive_strength": {
+            "Description": "Combined ideology motive and strength",
+            "Levels": {
+                "Anti-strong": "Strong anti-ideology motive",
+                "Anti-moderate": "Moderate anti-ideology motive",
+                "Anti-weak": "Weak anti-ideology motive",
+                "Neutral": "Neutral motive",
+                "Pro-weak": "Weak pro-ideology motive",
+                "Pro-moderate": "Moderate pro-ideology motive",
+                "Pro-strong": "Strong pro-ideology motive"
+            }
+        },
+        "questionnaire_attention_check": {
+            "Description": "Result of attention check in the questionnaire",
+            "Levels": {
+                "failed": "Participant failed the attention check",
+                "passed": "Participant passed the attention check"
+            }
+        },
+        "task_attention_check": {
+            "Description": "Result of attention check in the task",
+            "Levels": {
+                "failed": "Participant failed the attention check",
+                "passed": "Participant passed the attention check"
+            }
+        },
+        "attention_start": {
+            "Description": "Indicates if the participant promised to be attentive at the start",
+            "Levels": {
+                "No": "Participant did not promise to be attentive",
+                "Yes": "Participant promised to be attentive"
+            }
+        },
+        "attention_end": {
+            "Description": "Indicates if the participant indiated to have been attentive at the end",
+            "Levels": {
+                "No": "Participant did not promise to be attentive",
+                "Yes": "Participant promised to be attentive"
+            }
+        },
+        "issue_direction": {
+            "Description": "Direction of the issue motive of participants (e.g., Higher, Lower, Neutral)",
+            "Levels": {
+                "Higher": "Greater than messages would align with participants motive as coded from issue questionnaire",
+                "Lower": "Less than messages would align with participants motive as coded from issue questionnaire",
+                "Neutral": "Neutral (participant indicated motive on mid-point of the scale)"
+            }
+        },
+        "ideo_direction": {
+            "Description": "Direction of the ideology motive of participants (e.g., Higher, Lower, Neutral)",
+            "Levels": {
+                "Higher": "Greater than messages would align with participants motive as coded from ideology",
+                "Lower": "Less than messages would align with participants motive as coded from ideology",
+                "Neutral": "Neutral (participant indicated to be a moderate, i.e., neither left nor right-wing)"
+            }
+        }
+    }
+}
